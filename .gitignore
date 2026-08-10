@@ -7,15 +7,20 @@ venv/
 .python-deps/
 .env
 
-# Django
+# Python / JavaScript build output
+*.sqlite3
 staticfiles/
 media/
-
-# Node
 node_modules/
-frontend/dist/
-frontend/.vite/
+**/dist/
+**/build/
+**/.vite/
 npm-debug.log*
+
+# Test / tooling output
+.pytest_cache/
+.coverage
+htmlcov/
 
 # IDE / OS
 .DS_Store
