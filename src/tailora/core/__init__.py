@@ -4,12 +4,14 @@ from tailora.core.enums import Framework
 from tailora.core.events import ErrorSummary, QueryEvent, RequestEvent
 from tailora.core.policies import RedactionPolicy
 from tailora.core.privacy import redact_event
+from tailora.core.store import RingBuffer
 
 __all__ = [
     "ErrorSummary",
     "Framework",
     "QueryEvent",
     "RedactionPolicy",
+    "RingBuffer",
     "RequestEvent",
     "redact_event",
 ]

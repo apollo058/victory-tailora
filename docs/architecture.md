@@ -81,6 +81,9 @@ The default store should be process-local and bounded:
 
 - Keep only the most recent N request events.
 - Evict old events automatically.
+- Use a deque for event order and a request ID index for direct lookup.
+- Return snapshots so callers cannot change the stored events.
+- Protect changes and snapshots with a lock for concurrent access.
 - Avoid a migration or external database for the basic experience.
 - Offer a future store interface for Redis, files, or OpenTelemetry export.
 
@@ -96,4 +99,3 @@ The default store should be process-local and bounded:
 ## Swagger integration boundary
 
 The project should integrate through Swagger UI's plugin and layout APIs. It should not fork Swagger UI or modify its core source. The supported Swagger UI minor version should be pinned and tested because custom plugins may rely on internal component APIs.
-
