@@ -6,9 +6,10 @@ The project aims to make request and database behavior visible while developing 
 
 ## Current status
 
-STEP 3 is in progress. The `tailora` Python package includes framework-neutral event
-models and privacy redaction for headers, query parameters, SQL, fingerprints, and
-error summaries. A minimal FastAPI example exposes a `/health` endpoint.
+STEP 4 is in progress. The `tailora` Python package includes framework-neutral event
+models, privacy redaction for headers, query parameters, SQL, fingerprints, and
+error summaries, plus a bounded process-local `RingBuffer` for recent events. A
+minimal FastAPI example exposes a `/health` endpoint.
 
 Runtime logging, event collection, the Swagger integration, and the PyPI release have not been implemented yet.
 

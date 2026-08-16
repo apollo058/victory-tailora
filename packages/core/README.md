@@ -14,6 +14,8 @@ The core package contains framework-neutral request and query event models.
 - Header and query-parameter helpers apply case-insensitive redaction and item limits.
 - SQL literals, comments, and common quoted values are replaced before storage.
 - Policy values validate count limits and cap text lengths.
+- `tailora.core.store.RingBuffer` keeps recent events in bounded process-local memory.
+- The store supports latest-first listing, request ID lookup, eviction, clearing, and snapshots.
 
-The models and privacy helpers do not import FastAPI or SQLAlchemy. Storage,
-aggregation, and framework adapters will be added in later steps.
+The models, privacy helpers, and store do not import FastAPI or SQLAlchemy. Aggregation
+and framework adapters will be added in later steps.
