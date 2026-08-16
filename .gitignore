@@ -2,10 +2,20 @@
 __pycache__/
 *.py[cod]
 *.sqlite3
+*.sqlite
+*.db
 .venv/
 venv/
 .python-deps/
 .env
+.env.*
+!.env.example
+.secrets/
+secrets/
+*.secret
+*.token
+*.pem
+*.key
 
 # Python / JavaScript build output
 *.sqlite3
@@ -16,13 +26,34 @@ node_modules/
 **/build/
 **/.vite/
 npm-debug.log*
+*.log
+logs/
+*.pid
+*.pid.lock
+
+# Python packaging output
+*.egg
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
 
 # Test / tooling output
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.tox/
+.nox/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
+test-results/
+junit.xml
 
 # IDE / OS
 .DS_Store
 .idea/
 .vscode/
+plan_*/
+AGENTS.md

@@ -6,9 +6,34 @@ The project aims to make request and database behavior visible while developing 
 
 ## Current status
 
-This repository is in the idea and architecture planning stage. Runtime logging, the Swagger integration, and the PyPI package have not been implemented yet.
+STEP 1 is in progress. The `tailora` Python package can be installed in editable mode, its package import is covered by a unit test, and a minimal FastAPI example exposes a `/health` endpoint.
 
-There is intentionally no runnable product application in the repository yet. Implementation will begin after the product boundaries and event model are settled.
+Runtime logging, event collection, the Swagger integration, and the PyPI release have not been implemented yet.
+
+## Development setup
+
+Create a virtual environment and install the package with development and FastAPI tools:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev,fastapi]"
+```
+
+Run the checks:
+
+```bash
+python -m pytest
+ruff check .
+```
+
+Run the minimal FastAPI example:
+
+```bash
+python -m uvicorn examples.fastapi.app:app --reload
+```
+
+Then open `http://127.0.0.1:8000/health`. The response should be `{"status":"ok"}`.
 
 ## Product idea
 
@@ -50,19 +75,24 @@ The API documentation remains Swagger UI. Inspector is an additional tab supplie
 5. **Safe defaults** — redact secrets and query parameters, cap memory usage, and avoid response-body capture by default.
 6. **Optional depth** — start with request and SQL timing; add stack traces, EXPLAIN, sampling, and OpenTelemetry export later.
 
-## Planned repository shape
+## Repository shape
 
 ```text
-packages/
-├── core/                    Shared event model, storage, aggregation, and redaction
-├── adapters/
-│   ├── django_ninja/        Django request and database integration
-│   └── fastapi/             ASGI request and SQLAlchemy/DB integration
-└── swagger_ui_plugin/       Inspector tab and Swagger UI integration
+src/
+└── tailora/
+	├── core/                Shared event model and storage will live here
+	└── adapters/            Framework integrations will live here
+		└── fastapi/
+
+tests/
+├── unit/
+└── integration/
 
 examples/
 ├── django_ninja/            Minimal example application
-└── fastapi/                 Minimal example application
+└── fastapi/                 Minimal runnable FastAPI application
+
+packages/                    Planning documents for future package boundaries
 
 docs/
 ├── idea.md                  Product scope and open questions
@@ -71,7 +101,7 @@ docs/
 
 ```
 
-## Planned installation experience
+## Planned product installation experience
 
 The exact package name is intentionally still open. The intended experience is approximately:
 
