@@ -20,8 +20,13 @@ _RELATIVE_PATH_PATTERN: re.Pattern[str] = re.compile(
     r"[\w.-]+\.(?:py|js|ts|go|java|sql)(?::\d+)?",
     re.IGNORECASE,
 )
+_COOKIE_ASSIGNMENT_PATTERN: re.Pattern[str] = re.compile(
+    r"(?P<key>\b(?:cookie|set-cookie)\b)"
+    r"(?P<separator>\s*[:=]\s*)[^\r\n]+",
+    re.IGNORECASE,
+)
 _SECRET_ASSIGNMENT_PATTERN: re.Pattern[str] = re.compile(
-    r"(?P<key>\b(?:authorization|cookie|set-cookie|password|passwd|pwd|"
+    r"(?P<key>\b(?:authorization|password|passwd|pwd|"
     r"token|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|"
     r"client[_-]?secret)\b)"
     r"(?P<separator>\s*[:=]\s*)(?:bearer\s+)?[^\s,;]+",
@@ -155,6 +160,7 @@ def _redact_error_text(text: str | None, max_length: int) -> str | None:
     safe = _WINDOWS_PATH_PATTERN.sub(REDACTED, safe)
     safe = _PATH_PATTERN.sub(REDACTED, safe)
     safe = _RELATIVE_PATH_PATTERN.sub(REDACTED, safe)
+    safe = _COOKIE_ASSIGNMENT_PATTERN.sub(_replace_secret_assignment, safe)
     safe = _SECRET_ASSIGNMENT_PATTERN.sub(_replace_secret_assignment, safe)
     safe = _BEARER_PATTERN.sub(f"Bearer {REDACTED}", safe)
     safe = _EMAIL_PATTERN.sub(REDACTED, safe)
@@ -295,14 +301,14 @@ def redact_event(
     if not policy.enabled:
         return event
 
-    redacted_queries = [_redact_query_event(q, policy) for q in event.queries]
     limited_queries, _ = truncate_list(
-        redacted_queries,
+        event.queries,
         policy.max_queries_per_request,
     )
+    redacted_queries = [_redact_query_event(q, policy) for q in limited_queries]
 
     return dataclasses.replace(
         event,
-        queries=limited_queries,
+        queries=redacted_queries,
         error=redact_error_summary(event.error, policy),
     )

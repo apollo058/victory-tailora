@@ -8,6 +8,7 @@ from tailora.core.events import ErrorSummary, QueryEvent, RequestEvent
 from tailora.core.policies import (
     RedactionPolicy,
 )
+import tailora.core.privacy as privacy
 from tailora.core.privacy import redact_event
 from tailora.core.privacy import redact_error_summary
 
@@ -181,6 +182,24 @@ def test_redact_error_summary_removes_secret_assignments_and_windows_paths():
     assert r"C:\Users\victory\project" not in (result.message or "")
 
 
+@pytest.mark.parametrize("header_name", ["cookie", "set-cookie"])
+def test_redact_error_summary_redacts_all_cookie_pairs(header_name):
+    """오류 메시지의 쿠키 값 전체를 제거하는지 확인한다."""
+    error = ErrorSummary(
+        type="RuntimeError",
+        message=(
+            f"request failed: {header_name}=session-secret; "
+            "csrftoken=csrf-secret"
+        ),
+    )
+
+    result = redact_error_summary(error)
+
+    assert result is not None
+    assert "session-secret" not in (result.message or "")
+    assert "csrf-secret" not in (result.message or "")
+
+
 def test_redact_event_preserves_error_type():
     """redact_event 후에도 오류 타입 이름은 유지되는지 확인한다."""
     error = ErrorSummary(type="ValueError", message="something went wrong")
@@ -212,6 +231,26 @@ def test_redact_event_limits_queries_to_max_count():
     result = redact_event(event, policy=policy)
 
     assert len(result.queries) == 2
+
+
+def test_redact_event_redacts_only_queries_within_max_count(monkeypatch):
+    """최대 개수 밖의 쿼리는 redaction하지 않는지 확인한다."""
+    policy = RedactionPolicy(max_queries_per_request=2)
+    queries = [make_query(i) for i in range(1, 5)]
+    event = make_event(queries=queries)
+    redacted_sequences: list[int] = []
+    original_redact_query_event = privacy._redact_query_event
+
+    def spy_redact_query_event(query, query_policy):
+        """호출된 쿼리 순서를 기록하고 원래 redaction을 실행한다."""
+        redacted_sequences.append(query.sequence)
+        return original_redact_query_event(query, query_policy)
+
+    monkeypatch.setattr(privacy, "_redact_query_event", spy_redact_query_event)
+
+    redact_event(event, policy=policy)
+
+    assert redacted_sequences == [1, 2]
 
 
 def test_redact_event_query_count_reflects_truncation():
