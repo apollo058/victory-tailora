@@ -109,7 +109,9 @@ def request_event_from_dict(data: Mapping[str, Any]) -> RequestEvent:
     if not isinstance(data, Mapping):
         raise ValueError("request event must be an object")
     query_data = data.get("queries", [])
-    if not isinstance(query_data, list):
+    if query_data is None:
+        query_data = []
+    elif not isinstance(query_data, list):
         raise ValueError("queries must be a list")
     return RequestEvent(
         request_id=_required(data, "request_id"),

@@ -9,12 +9,12 @@ from tailora.core.enums import Framework
 
 
 def _require_text(value: Any, field_name: str, optional: bool = False) -> str | None:
-    """문자열 필드가 비어 있지 않은지 확인한다."""
+    """문자열 필드가 비어 있지 않은지 확인하고 앞뒤 공백을 제거한다."""
     if value is None and optional:
         return None
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field_name} must be a non-empty string")
-    return value
+    return value.strip()
 
 
 def _normalize_datetime(value: Any, field_name: str) -> datetime:

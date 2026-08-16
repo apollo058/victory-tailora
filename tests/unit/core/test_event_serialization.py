@@ -77,6 +77,20 @@ def test_request_event_json_round_trip_preserves_event():
     assert restored == event
 
 
+def test_request_event_from_dict_accepts_null_queries():
+    """쿼리 필드가 null이어도 쿼리 없는 요청으로 읽는지 확인한다."""
+    payload = request_event_to_dict(make_event())
+    payload["queries"] = None
+    payload["query_count"] = 0
+    payload["query_time_ms"] = 0.0
+
+    restored = request_event_from_dict(payload)
+
+    assert restored.queries == []
+    assert restored.query_count == 0
+    assert restored.query_time_ms == 0.0
+
+
 def test_error_summary_is_serialized_as_a_safe_nested_object():
     """오류 요약이 정해진 중첩 객체로 직렬화되는지 확인한다."""
     event = make_event()

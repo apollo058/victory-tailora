@@ -75,6 +75,21 @@ def test_query_id_cannot_be_empty():
         make_query(query_id="")
 
 
+def test_text_fields_trim_surrounding_whitespace():
+    """문자열 필드의 앞뒤 공백을 제거하는지 확인한다."""
+    event = make_request(
+        request_id=" req-1 ",
+        framework=" fastapi ",
+        method=" get ",
+        route_template=" /health ",
+    )
+
+    assert event.request_id == "req-1"
+    assert event.framework == "fastapi"
+    assert event.method == "GET"
+    assert event.route_template == "/health"
+
+
 def test_timestamp_must_include_timezone():
     """시각에 timezone 정보가 없으면 거부하는지 확인한다."""
     naive_time = datetime(2026, 8, 13, 10, 20, 30)
