@@ -10,6 +10,10 @@ The core package contains framework-neutral request and query event models.
 - Query count and total query time are calculated from the query list.
 - Event fields validate IDs, timestamps, durations, HTTP status codes, and query order.
 - `tailora.core.serialization` converts events to and from JSON-compatible data.
+- `tailora.core.privacy.redact_event` removes sensitive query, fingerprint, and error values.
+- Header and query-parameter helpers apply case-insensitive redaction and item limits.
+- SQL literals, comments, and common quoted values are replaced before storage.
+- Policy values validate count limits and cap text lengths.
 
-The models do not import FastAPI or SQLAlchemy. Redaction, storage, aggregation, and
-framework adapters will be added in later steps.
+The models and privacy helpers do not import FastAPI or SQLAlchemy. Storage,
+aggregation, and framework adapters will be added in later steps.
