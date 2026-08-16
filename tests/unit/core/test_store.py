@@ -144,6 +144,17 @@ def test_get_rejects_empty_request_id():
         RingBuffer().get(" ")
 
 
+def test_get_normalizes_request_id_whitespace():
+    """요청 ID 앞뒤 공백을 제거한 뒤 조회하는지 확인한다."""
+    store = RingBuffer()
+    store.add(make_event(" req-1 "))
+
+    result = store.get(" req-1 ")
+
+    assert result is not None
+    assert result.request_id == "req-1"
+
+
 def test_duplicate_request_id_is_rejected():
     """같은 요청 ID를 두 번 저장하지 못하게 하는지 확인한다."""
     store = RingBuffer()

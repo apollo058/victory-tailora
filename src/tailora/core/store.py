@@ -28,7 +28,7 @@ def _validate_request_id(value: object) -> str:
     """요청 ID가 비어 있지 않은 문자열인지 확인한다."""
     if not isinstance(value, str) or not value.strip():
         raise ValueError("request_id must be a non-empty string")
-    return value
+    return value.strip()
 
 
 class RingBuffer:
