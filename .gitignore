@@ -57,3 +57,4 @@ junit.xml
 .vscode/
 plan_*/
 AGENTS.md
+.agents/

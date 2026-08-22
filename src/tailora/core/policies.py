@@ -1,6 +1,7 @@
-"""Redaction 정책 설정을 제공한다."""
+"""Redaction 및 신호 임계값 정책 설정을 제공한다."""
 
 from dataclasses import dataclass, field
+import math
 
 DEFAULT_BLOCKED_HEADERS: frozenset[str] = frozenset({
     "authorization",
@@ -55,6 +56,38 @@ def _normalize_length(
     return min(max(value, minimum), maximum)
 
 
+def _validate_optional_positive_finite_float(
+    value: float | int | None,
+    field_name: str,
+) -> float | None:
+    """임계값이 None이거나 0보다 큰 유한한 실숫값인지 검증한다."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field_name} must be a number or None")
+    val_float = float(value)
+    if math.isnan(val_float) or math.isinf(val_float):
+        raise ValueError(f"{field_name} must be a finite number")
+    if val_float <= 0.0:
+        raise ValueError(f"{field_name} must be positive")
+    return val_float
+
+
+def _validate_optional_positive_int(
+    value: int | None,
+    field_name: str,
+    min_val: int = 1,
+) -> int | None:
+    """임계값이 None이거나 최소값 이상의 정수인지 검증한다."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{field_name} must be an integer or None")
+    if value < min_val:
+        raise ValueError(f"{field_name} must be at least {min_val}")
+    return value
+
+
 @dataclass(frozen=True)
 class RedactionPolicy:
     """이벤트 저장 전 적용할 개인정보 보호 규칙을 담는다."""
@@ -75,11 +108,15 @@ class RedactionPolicy:
 
     def __post_init__(self) -> None:
         """기본 차단 목록을 보장하고 설정값을 안전한 범위로 보정한다."""
-        custom_headers = _normalize_keys(self.blocked_headers, "blocked_headers")
+        custom_headers = _normalize_keys(
+            self.blocked_headers, "blocked_headers"
+        )
         merged_headers = DEFAULT_BLOCKED_HEADERS | custom_headers
         object.__setattr__(self, "blocked_headers", merged_headers)
 
-        custom_keys = _normalize_keys(self.blocked_query_keys, "blocked_query_keys")
+        custom_keys = _normalize_keys(
+            self.blocked_query_keys, "blocked_query_keys"
+        )
         merged_keys = DEFAULT_BLOCKED_QUERY_KEYS | custom_keys
         object.__setattr__(self, "blocked_query_keys", merged_keys)
 
@@ -122,5 +159,59 @@ class RedactionPolicy:
                 "max_error_length",
                 _MIN_ERROR_LENGTH,
                 _MAX_ERROR_LENGTH,
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class ThresholdPolicy:
+    """느린 요청, 느린 쿼리, 중복 쿼리 판정을 위한 임계값 설정을 담는다."""
+
+    slow_request_ms: float | None = 500.0
+    slow_query_ms: float | None = 100.0
+    duplicate_query_threshold: int | None = 2
+    query_heavy_count: int | None = 10
+    query_heavy_time_ms: float | None = 200.0
+
+    def __post_init__(self) -> None:
+        """설정값이 유효한 양수이거나 None(비활성화)인지 검증한다."""
+        object.__setattr__(
+            self,
+            "slow_request_ms",
+            _validate_optional_positive_finite_float(
+                self.slow_request_ms, "slow_request_ms"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "slow_query_ms",
+            _validate_optional_positive_finite_float(
+                self.slow_query_ms, "slow_query_ms"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "duplicate_query_threshold",
+            _validate_optional_positive_int(
+                self.duplicate_query_threshold,
+                "duplicate_query_threshold",
+                min_val=2,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "query_heavy_count",
+            _validate_optional_positive_int(
+                self.query_heavy_count,
+                "query_heavy_count",
+                min_val=1,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "query_heavy_time_ms",
+            _validate_optional_positive_finite_float(
+                self.query_heavy_time_ms,
+                "query_heavy_time_ms",
             ),
         )

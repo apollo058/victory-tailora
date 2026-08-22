@@ -102,11 +102,13 @@ def test_compute_aggregates_fingerprint_metrics():
 
     fp1_metric = fps[fp1]
     assert fp1_metric["count"] == 2
+    assert fp1_metric["request_count"] == 1
     assert fp1_metric["total_duration_ms"] == 6.0
     assert fp1_metric["avg_duration_ms"] == 3.0
 
     fp2_metric = fps[fp2]
     assert fp2_metric["count"] == 1
+    assert fp2_metric["request_count"] == 1
     assert fp2_metric["total_duration_ms"] == 10.0
     assert fp2_metric["avg_duration_ms"] == 10.0
 

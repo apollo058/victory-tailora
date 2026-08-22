@@ -2,7 +2,6 @@
 
 from collections.abc import Sequence
 from datetime import datetime, timezone
-from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, params
 from fastapi.testclient import TestClient
@@ -183,7 +182,7 @@ def test_aggregates_endpoint():
 
 
 def test_inspector_api_requests_not_captured_even_with_custom_excluded_paths():
-    """커스텀 excluded_paths를 지정해도 Inspector API 요청이 수집되지 않는지 확인한다."""
+    """커스텀 제외 경로 지정 시에도 Inspector 요청이 수집되지 않음을 확인한다."""
     app, store = create_inspector_app(excluded_paths=("/custom-ignore",))
     client = TestClient(app)
 
@@ -195,7 +194,7 @@ def test_inspector_api_requests_not_captured_even_with_custom_excluded_paths():
 
 
 def test_disabled_inspector_does_not_expose_routes():
-    """enable_inspector를 호출하지 않은 앱에는 Inspector 라우트가 노출되지 않는지 확인한다."""
+    """비활성 상태에서는 Inspector 라우트가 노출되지 않는지 확인한다."""
     app = FastAPI()
     client = TestClient(app)
 
@@ -245,7 +244,7 @@ def test_inspector_api_with_authentication_dependency():
 
 
 def test_enable_inspector_idempotent():
-    """enable_inspector를 중복 호출해도 미들웨어와 라우터가 중복 등록되지 않는지 확인한다."""
+    """enable_inspector를 중복 호출해도 중복 등록되지 않는지 확인한다."""
     app = FastAPI()
 
     @app.get("/hello")

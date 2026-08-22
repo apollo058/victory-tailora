@@ -7,15 +7,22 @@ from fastapi import APIRouter, Path, Query, params
 from fastapi.responses import JSONResponse
 
 from tailora.core.aggregation import compute_aggregates
+from tailora.core.analysis import (
+    analyze_request_signals,
+    summarize_request_signals,
+)
 from tailora.core.events import RequestEvent
-from tailora.core.policies import RedactionPolicy
+from tailora.core.policies import RedactionPolicy, ThresholdPolicy
 from tailora.core.privacy import redact_event
 from tailora.core.serialization import request_event_to_dict
 from tailora.core.store import RingBuffer
 
 
-def _summarize_request(event: RequestEvent) -> dict[str, Any]:
-    """요청 이벤트에서 목록 표시에 필요한 요약 정보만 추출한다."""
+def _summarize_request(
+    event: RequestEvent,
+    threshold_policy: ThresholdPolicy,
+) -> dict[str, Any]:
+    """요청 이벤트에서 목록 표시에 필요한 요약 정보와 신호 요약을 추출한다."""
     error_summary = None
     if event.error is not None:
         error_summary = {
@@ -23,6 +30,8 @@ def _summarize_request(event: RequestEvent) -> dict[str, Any]:
             "message": event.error.message,
             "stack_hint": event.error.stack_hint,
         }
+
+    signals = summarize_request_signals(event, threshold_policy)
 
     return {
         "request_id": event.request_id,
@@ -35,6 +44,7 @@ def _summarize_request(event: RequestEvent) -> dict[str, Any]:
         "query_count": event.query_count,
         "query_time_ms": event.query_time_ms,
         "error": error_summary,
+        "signals": signals,
     }
 
 
@@ -42,10 +52,17 @@ def create_inspector_router(
     store: RingBuffer,
     prefix: str = "/__tailora",
     policy: RedactionPolicy | None = None,
+    threshold_policy: ThresholdPolicy | None = None,
     dependencies: Sequence[params.Depends] | None = None,
 ) -> APIRouter:
     """지정된 저장소를 읽는 Inspector 전용 APIRouter를 생성한다."""
     resolved_policy = policy if policy is not None else RedactionPolicy()
+    resolved_thresholds = (
+        threshold_policy
+        if threshold_policy is not None
+        else ThresholdPolicy()
+    )
+
     router = APIRouter(
         prefix=prefix,
         tags=["Tailora Inspector"],
@@ -65,21 +82,37 @@ def create_inspector_router(
     def list_requests(
         limit: int = Query(default=20, ge=1, le=100),
     ) -> dict[str, Any]:
-        """최근 요청 이벤트 목록을 마스킹 적용 후 최신순으로 반환한다."""
+        """최근 요청 이벤트 목록을 마스킹 및 신호 분석 후 최신순으로 반환한다."""
         events = store.list(limit=limit)
         redacted_events = [redact_event(ev, resolved_policy) for ev in events]
-        items = [_summarize_request(ev) for ev in redacted_events]
+        items = [
+            _summarize_request(ev, resolved_thresholds)
+            for ev in redacted_events
+        ]
         return {
             "items": items,
             "count": len(items),
             "limit": limit,
+            "thresholds": {
+                "slow_request_ms": resolved_thresholds.slow_request_ms,
+                "slow_query_ms": resolved_thresholds.slow_query_ms,
+                "duplicate_query_threshold": (
+                    resolved_thresholds.duplicate_query_threshold
+                ),
+                "query_heavy_count": (
+                    resolved_thresholds.query_heavy_count
+                ),
+                "query_heavy_time_ms": (
+                    resolved_thresholds.query_heavy_time_ms
+                ),
+            },
         }
 
     @router.get("/requests/{request_id}")
     def get_request_detail(
         request_id: str = Path(..., description="조회할 요청 ID"),
     ) -> Any:
-        """단일 요청 이벤트와 연결된 쿼리 전체를 마스킹하여 반환한다."""
+        """단일 요청 이벤트와 연결된 쿼리 및 상세 신호 분석 결과를 반환한다."""
         event = store.get(request_id)
         if event is None:
             return JSONResponse(
@@ -94,13 +127,29 @@ def create_inspector_router(
                 },
             )
         redacted_event = redact_event(event, resolved_policy)
-        return request_event_to_dict(redacted_event)
+        result = request_event_to_dict(redacted_event)
+        result["signals"] = analyze_request_signals(
+            redacted_event,
+            resolved_thresholds,
+        )
+        return result
 
     @router.get("/aggregates")
     def get_aggregates() -> dict[str, Any]:
-        """현재 저장된 이벤트의 경로 및 Fingerprint 집계 결과를 반환한다."""
+        """현재 저장된 이벤트의 경로 및 Fingerprint 집계 결과와 임계값을 반환한다."""
         events = store.list()
         redacted_events = [redact_event(ev, resolved_policy) for ev in events]
-        return compute_aggregates(redacted_events)
+        aggregates = compute_aggregates(redacted_events)
+        aggregates["total_stored_requests"] = len(events)
+        aggregates["thresholds"] = {
+            "slow_request_ms": resolved_thresholds.slow_request_ms,
+            "slow_query_ms": resolved_thresholds.slow_query_ms,
+            "duplicate_query_threshold": (
+                resolved_thresholds.duplicate_query_threshold
+            ),
+            "query_heavy_count": resolved_thresholds.query_heavy_count,
+            "query_heavy_time_ms": resolved_thresholds.query_heavy_time_ms,
+        }
+        return aggregates
 
     return router

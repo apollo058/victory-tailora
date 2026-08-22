@@ -27,7 +27,9 @@ def _aggregate_routes(events: list[RequestEvent]) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for route, stats in route_stats.items():
         count = stats["count"]
-        avg_duration = round(stats["total_duration"] / count, 6) if count > 0 else 0.0
+        avg_duration = (
+            round(stats["total_duration"] / count, 6) if count > 0 else 0.0
+        )
         results.append(
             {
                 "route_template": route,
@@ -38,13 +40,18 @@ def _aggregate_routes(events: list[RequestEvent]) -> list[dict[str, Any]]:
             },
         )
 
-    return sorted(results, key=lambda item: (-item["count"], -item["avg_duration_ms"]))
+    return sorted(
+        results,
+        key=lambda item: (-item["count"], -item["avg_duration_ms"]),
+    )
 
 
-def _aggregate_fingerprints(events: list[RequestEvent]) -> list[dict[str, Any]]:
+def _aggregate_fingerprints(
+    events: list[RequestEvent],
+) -> list[dict[str, Any]]:
     """요청 이벤트 목록에서 SQL Fingerprint별 지표를 집계한다."""
     fp_stats: dict[str, dict[str, Any]] = defaultdict(
-        lambda: {"count": 0, "total_duration": 0.0},
+        lambda: {"count": 0, "total_duration": 0.0, "request_ids": set()},
     )
 
     for event in events:
@@ -53,6 +60,7 @@ def _aggregate_fingerprints(events: list[RequestEvent]) -> list[dict[str, Any]]:
                 stats = fp_stats[query.fingerprint]
                 stats["count"] += 1
                 stats["total_duration"] += query.duration_ms
+                stats["request_ids"].add(event.request_id)
 
     results: list[dict[str, Any]] = []
     for fp, stats in fp_stats.items():
@@ -63,6 +71,7 @@ def _aggregate_fingerprints(events: list[RequestEvent]) -> list[dict[str, Any]]:
             {
                 "fingerprint": fp,
                 "count": count,
+                "request_count": len(stats["request_ids"]),
                 "total_duration_ms": total_duration,
                 "avg_duration_ms": avg_duration,
             },
@@ -83,4 +92,3 @@ def compute_aggregates(events: list[RequestEvent]) -> dict[str, Any]:
         "routes": _aggregate_routes(events),
         "fingerprints": _aggregate_fingerprints(events),
     }
-
