@@ -103,7 +103,7 @@ def test_sqlite_queries_captured_in_request_event():
 
 
 def test_multiple_queries_sequence_and_aggregation():
-    """한 요청에서 실행된 복수 쿼리의 순서와 총 쿼리 시간이 정확히 집계되는지 확인한다."""
+    """한 요청에서 복수 쿼리의 순서와 총 쿼리 시간 집계를 확인한다."""
     app, engine, store = create_sqlite_test_app()
     try:
         client = TestClient(app)

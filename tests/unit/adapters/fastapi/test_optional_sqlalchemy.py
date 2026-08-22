@@ -8,7 +8,7 @@ from tailora.core.store import RingBuffer
 
 
 def test_enable_inspector_without_engine():
-    """엔진 없이 enable_inspector를 호출했을 때 SQLAlchemy 없이도 정상 동작하는지 확인한다."""
+    """엔진 없이 호출 시 SQLAlchemy 없이도 정상 동작하는지 확인한다."""
     app = FastAPI()
     store = enable_inspector(app)
 
