@@ -6,8 +6,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 
-def load_example_app():
-    """저장소의 FastAPI 예제 앱을 파일 경로로 불러온다."""
+def load_example_module():
+    """저장소의 FastAPI 예제 모듈을 파일 경로로 불러온다."""
     app_path = (
         Path(__file__).resolve().parents[2]
         / "examples"
@@ -21,14 +21,21 @@ def load_example_app():
 
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.app
+    return module
 
 
-def test_health_endpoint_returns_ok():
-    """health endpoint가 정상 상태를 반환하는지 확인한다."""
-    client = TestClient(load_example_app())
+def test_health_endpoint_returns_ok_and_records_event():
+    """헬스체크 엔드포인트가 정상 응답하고 이벤트를 기록하는지 확인한다."""
+    module = load_example_module()
+    client = TestClient(module.app)
 
     response = client.get("/health")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+    assert module.store.size() == 1
+
+    event = module.store.list()[0]
+    assert event.route_template == "/health"
+    assert event.status_code == 200
+    assert event.framework == "fastapi"

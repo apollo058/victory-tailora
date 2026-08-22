@@ -2,7 +2,13 @@
 
 from fastapi import FastAPI
 
+from tailora.adapters.fastapi import enable_inspector
+from tailora.core.store import RingBuffer
+
 app = FastAPI(title="Tailora FastAPI Example")
+store = RingBuffer()
+
+enable_inspector(app, store=store)
 
 
 @app.get("/health")
