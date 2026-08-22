@@ -39,3 +39,23 @@ def test_health_endpoint_returns_ok_and_records_event():
     assert event.route_template == "/health"
     assert event.status_code == 200
     assert event.framework == "fastapi"
+    assert event.query_count == 0
+
+
+def test_user_endpoint_executes_query_and_records_event():
+    """사용자 조회 시 SQL 쿼리가 실행되고 이벤트에 쿼리가 연결되는지 확인한다."""
+    module = load_example_module()
+    client = TestClient(module.app)
+
+    response = client.get("/users/1")
+
+    assert response.status_code == 200
+    assert response.json() == {"id": "1", "name": "Alice"}
+    assert module.store.size() == 1
+
+    event = module.store.list()[0]
+    assert event.route_template == "/users/{user_id}"
+    assert event.query_count == 1
+    assert len(event.queries) == 1
+    assert event.queries[0].database == "sqlite"
+    assert event.queries[0].statement == "SELECT name FROM users WHERE id = ?"

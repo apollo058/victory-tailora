@@ -43,7 +43,7 @@ def create_test_app(
     @app.get("/users/{user_id}")
     def get_user(user_id: int) -> dict[str, int]:
         """사용자 조회 및 쿼리 기록 엔드포인트."""
-        record_query(make_query(1, f"SELECT * FROM users WHERE id = {user_id}"))
+        record_query(make_query(1, "SELECT * FROM users WHERE id = 42"))
         return {"user_id": user_id}
 
     @app.get("/not-found")
@@ -55,6 +55,18 @@ def create_test_app(
     def teapot_route() -> None:
         """418 HTTPException을 발생하는 엔드포인트."""
         raise HTTPException(status_code=418, detail="I am a teapot")
+
+    @app.get("/secret-error")
+    def secret_error_route() -> None:
+        """민감정보가 포함된 detail을 던지는 엔드포인트."""
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "password": "super-secret-value",
+                "token": "abc123secret",
+                "msg": "Invalid token provided",
+            },
+        )
 
     @app.get("/crash")
     def crash_route() -> None:
@@ -170,6 +182,24 @@ def test_http_exception_captured_with_error_summary():
     assert event_418.error is not None
     assert event_418.error.type == "HTTPException"
     assert event_418.error.message == "I am a teapot"
+
+
+def test_http_exception_with_sensitive_detail_redacted():
+    """HTTP 에러 detail에 포함된 민감정보가 안전하게 마스킹되는지 확인한다."""
+    store = RingBuffer()
+    app = create_test_app(store=store, enabled=True)
+    client = TestClient(app)
+
+    response = client.get("/secret-error")
+    assert response.status_code == 400
+    assert store.size() == 1
+
+    event = store.list()[0]
+    assert event.error is not None
+    assert event.error.type == "HTTPException"
+    assert "super-secret-value" not in (event.error.message or "")
+    assert "abc123secret" not in (event.error.message or "")
+    assert "Invalid token provided" in (event.error.message or "")
 
 
 def test_unhandled_exception_captured_and_reraised():
