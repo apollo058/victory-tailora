@@ -17,7 +17,7 @@ from tailora.core.context import (
 from tailora.core.enums import Framework
 from tailora.core.events import ErrorSummary, QueryEvent, RequestEvent
 from tailora.core.policies import RedactionPolicy
-from tailora.core.privacy import redact_event
+from tailora.core.privacy import redact_error_summary, redact_event
 from tailora.core.store import RingBuffer
 
 Scope = dict[str, Any]
@@ -53,21 +53,46 @@ def _summarize_exception(exc: Exception) -> ErrorSummary:
     return ErrorSummary(type=exc.__class__.__name__, message=message)
 
 
-def _extract_error_from_body(body_bytes: bytes, status_code: int) -> ErrorSummary | None:
-    """에러 응답 본문에서 메시지를 추출해 ErrorSummary를 만든다."""
+def _extract_detail_message(detail: Any) -> str:
+    """에러 detail 객체에서 안전한 요약 문자열만 추출한다."""
+    if isinstance(detail, str):
+        return detail
+    if isinstance(detail, dict):
+        for key in ("msg", "message", "detail", "error"):
+            val = detail.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        return "HTTP Error Details"
+    if isinstance(detail, list) and detail:
+        first = detail[0]
+        if isinstance(first, dict):
+            for key in ("msg", "message"):
+                val = first.get(key)
+                if isinstance(val, str) and val.strip():
+                    return val.strip()
+        return "Validation Error"
+    return "HTTP Error"
+
+
+def _extract_error_from_body(
+    body_bytes: bytes,
+    status_code: int,
+    policy: RedactionPolicy | None = None,
+) -> ErrorSummary | None:
+    """에러 응답 본문에서 요약 메시지를 추출하고 민감정보를 마스킹한다."""
     if not body_bytes or status_code < 400:
         return None
+    raw_message = f"HTTP {status_code}"
     try:
         data = json.loads(body_bytes.decode("utf-8", errors="ignore"))
         if isinstance(data, dict) and "detail" in data:
-            detail = data["detail"]
-            msg = detail if isinstance(detail, str) else json.dumps(detail)
-            err_type = "HTTPException" if status_code < 500 else "HTTPError"
-            return ErrorSummary(type=err_type, message=msg)
+            raw_message = _extract_detail_message(data["detail"])
     except Exception:
         pass
-    default_type = "HTTPException" if status_code < 500 else "HTTPError"
-    return ErrorSummary(type=default_type, message=f"HTTP {status_code}")
+
+    err_type = "HTTPException" if status_code < 500 else "HTTPError"
+    raw_summary = ErrorSummary(type=err_type, message=raw_message)
+    return redact_error_summary(raw_summary, policy)
 
 
 def _safe_normalize_queries(queries: list[QueryEvent]) -> list[QueryEvent]:
@@ -184,7 +209,11 @@ class TailoraMiddleware:
             elif msg_type == "http.response.body" and status_code >= 400:
                 if error_summary is None:
                     body_chunk = message.get("body", b"")
-                    error_summary = _extract_error_from_body(body_chunk, status_code)
+                    error_summary = _extract_error_from_body(
+                        body_chunk,
+                        status_code,
+                        self.policy,
+                    )
             await send(message)
 
         try:
