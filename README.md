@@ -6,14 +6,14 @@ The project aims to make request and database behavior visible while developing 
 
 ## Current status
 
-STEP 6 is complete. The `tailora` Python package includes framework-neutral event
+STEP 7 is complete. The `tailora` Python package includes framework-neutral event
 models, privacy redaction for headers, query parameters, SQL, fingerprints, and
 error summaries, a bounded process-local `RingBuffer`, an ASGI middleware for
-FastAPI request capture with async request context isolation, and a SQLAlchemy
-Engine hook for query capture and timing. A minimal FastAPI example with SQLite
-exposes `/health` and `/users/{user_id}` endpoints.
+FastAPI request capture with async request context isolation, a SQLAlchemy
+Engine hook for query capture, and the read-only Inspector JSON API (`/__tailora/*`).
+A minimal FastAPI example with SQLite exposes `/health` and `/users/{user_id}`.
 
-The Inspector JSON API (STEP 7), the Swagger integration, and the PyPI release
+Slow/duplicate query analysis (STEP 8), the Swagger integration, and the PyPI release
 are in progress.
 
 ## Development setup

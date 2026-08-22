@@ -1,5 +1,6 @@
 """Tailora의 공통 핵심 모듈."""
 
+from tailora.core.aggregation import compute_aggregates
 from tailora.core.context import (
     RequestContext,
     get_current_context,
@@ -21,6 +22,7 @@ __all__ = [
     "RequestContext",
     "RequestEvent",
     "RingBuffer",
+    "compute_aggregates",
     "get_current_context",
     "record_query",
     "redact_event",
