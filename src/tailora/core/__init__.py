@@ -1,5 +1,12 @@
 """Tailora의 공통 핵심 모듈."""
 
+from tailora.core.context import (
+    RequestContext,
+    get_current_context,
+    record_query,
+    reset_current_context,
+    set_current_context,
+)
 from tailora.core.enums import Framework
 from tailora.core.events import ErrorSummary, QueryEvent, RequestEvent
 from tailora.core.policies import RedactionPolicy
@@ -11,7 +18,13 @@ __all__ = [
     "Framework",
     "QueryEvent",
     "RedactionPolicy",
-    "RingBuffer",
+    "RequestContext",
     "RequestEvent",
+    "RingBuffer",
+    "get_current_context",
+    "record_query",
     "redact_event",
+    "reset_current_context",
+    "set_current_context",
 ]
+
