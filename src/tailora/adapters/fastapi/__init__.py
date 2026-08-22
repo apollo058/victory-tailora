@@ -7,7 +7,7 @@ from fastapi import FastAPI, params
 
 from tailora.adapters.fastapi.api import create_inspector_router
 from tailora.adapters.fastapi.middleware import TailoraMiddleware
-from tailora.core.policies import RedactionPolicy
+from tailora.core.policies import RedactionPolicy, ThresholdPolicy
 from tailora.core.store import RingBuffer
 
 _STATE_ENABLED_KEY = "_tailora_inspector_enabled"
@@ -18,6 +18,7 @@ def enable_inspector(
     app: FastAPI,
     store: RingBuffer | None = None,
     policy: RedactionPolicy | None = None,
+    threshold_policy: ThresholdPolicy | None = None,
     engine: object | None = None,
     prefix: str = "/__tailora",
     excluded_paths: tuple[str, ...] | None = None,
@@ -47,6 +48,7 @@ def enable_inspector(
         store=resolved_store,
         prefix=prefix,
         policy=policy,
+        threshold_policy=threshold_policy,
         dependencies=dependencies,
     )
     app.include_router(router)

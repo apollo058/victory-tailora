@@ -59,15 +59,19 @@ def _on_before_cursor_execute(
     context: Any,
     executemany: bool,
 ) -> None:
-    """쿼리 실행 직전에 시작 시각과 단조 시계를 connection.info에 임시 보관한다."""
+    """쿼리 실행 직전에 시작 시각과 단조 시계를 context 또는 connection에 보관한다."""
     if get_current_context() is None:
         return
     try:
-        conn.info[_STATE_KEY] = (
+        state = (
             datetime.now(timezone.utc),
             time.perf_counter(),
             statement,
         )
+        if context is not None:
+            setattr(context, _STATE_KEY, state)
+        elif hasattr(conn, "info"):
+            conn.info[_STATE_KEY] = state
     except Exception:
         # 수집기 내부 오류가 SQL 실행을 방해하지 않는다.
         pass
@@ -84,7 +88,12 @@ def _on_after_cursor_execute(
 ) -> None:
     """쿼리 실행 완료 시 실행 시간을 측정하고 QueryEvent를 현재 컨텍스트에 추가한다."""
     try:
-        state = conn.info.pop(_STATE_KEY, None) if hasattr(conn, "info") else None
+        state = None
+        if context is not None and hasattr(context, _STATE_KEY):
+            state = getattr(context, _STATE_KEY, None)
+        elif hasattr(conn, "info"):
+            state = conn.info.pop(_STATE_KEY, None)
+
         if state is None:
             return
 
@@ -116,12 +125,13 @@ def _on_handle_error(
 ) -> None:
     """쿼리 실패 시 ErrorSummary가 포함된 QueryEvent를 기록한다."""
     try:
+        exec_ctx = getattr(exception_context, "execution_context", None)
         conn = getattr(exception_context, "connection", None)
-        state = (
-            conn.info.pop(_STATE_KEY, None)
-            if conn and hasattr(conn, "info")
-            else None
-        )
+        state = None
+        if exec_ctx is not None and hasattr(exec_ctx, _STATE_KEY):
+            state = getattr(exec_ctx, _STATE_KEY, None)
+        elif conn and hasattr(conn, "info"):
+            state = conn.info.pop(_STATE_KEY, None)
 
         if state is not None:
             started_at, start_perf, original_stmt = state
