@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="tailora-base-path" content="{{BASE_PATH}}">
+  <title>Tailora Inspector — 실시간 API 및 쿼리 진단</title>
+  <link rel="stylesheet" href="{{BASE_PATH}}/styles.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- 상단 글로벌 헤더 -->
+    <header class="app-header" role="banner">
+      <div class="header-left">
+        <div class="brand">
+          <span class="brand-logo" aria-hidden="true">⚡</span>
+          <h1 class="brand-title">Tailora Inspector</h1>
+          <span class="brand-tag">Dev Preview</span>
+        </div>
+        <div class="server-status" id="server-status-pill" aria-live="polite">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span class="status-label" id="status-label">상태 확인 중...</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="meta-info" id="last-updated-wrapper" title="마지막 새로고침 시각">
+          <span class="meta-label">마지막 갱신:</span>
+          <time class="meta-val" id="last-refreshed-time">-</time>
+        </div>
+        <button type="button" class="btn btn-primary" id="btn-refresh" aria-label="최근 요청 목록 새로고침 (단축키: R)">
+          <span class="btn-icon" aria-hidden="true">↻</span>
+          <span class="btn-text">새로고침</span>
+          <kbd class="shortcut-key" aria-hidden="true">R</kbd>
+        </button>
+      </div>
+    </header>
+
+    <!-- 메인 대시보드 2열 스플릿 뷰 -->
+    <main class="dashboard-container" role="main">
+      <!-- 좌측: 최근 요청 목록 패널 -->
+      <section class="panel list-panel" aria-labelledby="list-heading">
+        <div class="panel-header">
+          <div class="panel-header-left">
+            <h2 id="list-heading" class="panel-title">최근 요청 목록</h2>
+            <span class="count-badge" id="request-count-badge">0</span>
+          </div>
+          <div class="panel-header-actions">
+            <span class="hint-text">최신순 20건</span>
+          </div>
+        </div>
+
+        <div class="panel-body list-body" id="list-container" role="region" aria-live="polite" aria-label="요청 목록">
+          <!-- 목록 상태별 렌더링 영역 (로딩, 빈 상태, 에러, 실제 목록) -->
+          <div class="state-container state-loading" id="list-loading-state">
+            <div class="spinner" aria-hidden="true"></div>
+            <p class="state-text">저장된 요청을 불러오고 있습니다...</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 우측: 요청 상세 및 쿼리 표 패널 -->
+      <section class="panel detail-panel" aria-labelledby="detail-heading">
+        <div class="panel-header">
+          <div class="panel-header-left">
+            <h2 id="detail-heading" class="panel-title">요청 상세 및 진단</h2>
+          </div>
+          <div class="panel-header-actions" id="detail-actions">
+            <!-- 선택된 요청 ID 복사 버튼 등 -->
+          </div>
+        </div>
+
+        <div class="panel-body detail-body" id="detail-container" role="region" aria-live="polite" aria-label="요청 상세 정보">
+          <!-- 상세 초기 상태 (선택 요청 없음) -->
+          <div class="state-container state-unselected" id="detail-placeholder-state">
+            <div class="placeholder-icon" aria-hidden="true">🔍</div>
+            <h3 class="placeholder-title">선택된 요청이 없습니다</h3>
+            <p class="placeholder-desc">좌측 목록에서 요청을 클릭하거나 키보드 방향키로 선택하여 세부 진단 결과와 쿼리를 확인하세요.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="{{BASE_PATH}}/app.js"></script>
+</body>
+</html>
