@@ -152,4 +152,40 @@ def create_inspector_router(
         }
         return aggregates
 
+    @router.get("", include_in_schema=False)
+    @router.get("/", include_in_schema=False)
+    def inspector_ui_index() -> Any:
+        """독립형 Inspector 웹 화면 HTML을 반환한다."""
+        from fastapi.responses import Response
+
+        from tailora.ui.loader import get_inspector_asset
+
+        content, content_type = get_inspector_asset("index.html", base_path=prefix)
+        return Response(content=content, media_type=content_type)
+
+    @router.get("/{asset_name:path}", include_in_schema=False)
+    def inspector_ui_asset(asset_name: str) -> Any:
+        """독립형 Inspector 정적 자산(CSS, JS 등)을 반환한다."""
+        from fastapi.responses import Response
+
+        from tailora.ui.loader import get_inspector_asset
+
+        try:
+            content, content_type = get_inspector_asset(
+                asset_name,
+                base_path=prefix,
+            )
+            return Response(content=content, media_type=content_type)
+        except FileNotFoundError:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": {
+                        "code": "asset_not_found",
+                        "message": "Requested static asset was not found.",
+                    },
+                },
+            )
+
     return router
+
