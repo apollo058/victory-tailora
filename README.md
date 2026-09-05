@@ -6,17 +6,18 @@ The project aims to make request and database behavior visible while developing 
 
 ## Current status
 
-STEP 8 is complete. The `tailora` Python package includes framework-neutral event
-models, privacy redaction for headers, query parameters, SQL, fingerprints, and
-error summaries, a bounded process-local `RingBuffer`, an ASGI middleware for
-FastAPI request capture with async request context isolation, a SQLAlchemy
-Engine hook for query capture, the read-only Inspector JSON API (`/__tailora/*`),
-and threshold-based performance signals analysis (`slow_request`, `slow_query`,
-`duplicate_query`, `query_heavy`). A minimal FastAPI example with SQLite exposes
-`/health` and `/users/{user_id}`.
+STEP 10이 완료되었습니다. `tailora` Python 패키지에는 프레임워크와 무관한
+이벤트 모델, 헤더·쿼리 파라미터·SQL·fingerprint·오류 요약의 개인정보 마스킹,
+제한된 프로세스 내부 `RingBuffer`, 비동기 요청 컨텍스트를 격리하는 FastAPI
+요청 수집 미들웨어, SQLAlchemy Engine 쿼리 수집 hook, 읽기 전용 Inspector JSON
+API(`/__tailora/*`), threshold 기반 성능 신호 분석(`slow_request`,
+`slow_query`, `duplicate_query`, `query_heavy`), 독립형 Inspector UI가 포함됩니다.
+FastAPI의 기존 Swagger UI에는 Inspector 탭이 추가되며, API Docs와 Try it out
+상태를 유지한 채 같은 docs URL 안에서 Inspector를 사용할 수 있습니다.
 
-The standalone Inspector UI (STEP 9), the Swagger integration, and the PyPI release
-are in progress.
+STEP 11의 환경별 활성화·보안 기본값과 STEP 12의 PyPI release는 아직 진행하지
+않았습니다. SQLite를 사용하는 최소 FastAPI 예제는 `/health`와
+`/users/{user_id}`를 제공합니다.
 
 ## Development setup
 
@@ -42,6 +43,13 @@ python -m uvicorn examples.fastapi.app:app --reload
 ```
 
 Then open `http://127.0.0.1:8000/health`. The response should be `{"status":"ok"}`.
+
+## Swagger UI 호환성
+
+Tailora는 Swagger UI `5.17.14`의 공식 plugin과 custom layout 확장 지점을
+지원합니다. `enable_inspector(app)`를 호출하면 Inspector가 활성화된 경우에만
+FastAPI가 만든 기본 Swagger docs route에 Inspector 탭을 추가합니다. Swagger UI
+core를 복사하거나 수정하지 않으며, custom docs URL과 `root_path`도 지원합니다.
 
 ## Product idea
 

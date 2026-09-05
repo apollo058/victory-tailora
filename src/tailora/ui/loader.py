@@ -13,6 +13,8 @@ ALLOWED_ASSETS: set[str] = {
     "index.html",
     "styles.css",
     "app.js",
+    "swagger-plugin.css",
+    "swagger-plugin.js",
 }
 
 

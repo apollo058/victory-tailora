@@ -6,6 +6,10 @@ from typing import Any
 from fastapi import FastAPI, params
 
 from tailora.adapters.fastapi.api import create_inspector_router
+from tailora.adapters.fastapi.docs import (
+    get_docs_excluded_paths,
+    install_tailora_docs,
+)
 from tailora.adapters.fastapi.middleware import TailoraMiddleware
 from tailora.core.policies import RedactionPolicy, ThresholdPolicy
 from tailora.core.store import RingBuffer
@@ -32,9 +36,10 @@ def enable_inspector(
 
     resolved_store = store if store is not None else RingBuffer()
 
-    # 사용자가 커스텀 제외 경로를 지정해도 시스템 prefix는 항상 포함
+    # 사용자가 커스텀 제외 경로를 지정해도 시스템 경로는 항상 포함
     user_paths = list(excluded_paths) if excluded_paths is not None else []
-    merged_paths = tuple(dict.fromkeys(user_paths + [prefix]))
+    system_paths = [prefix, *get_docs_excluded_paths(app)]
+    merged_paths = tuple(dict.fromkeys(user_paths + system_paths))
 
     app.add_middleware(
         TailoraMiddleware,
@@ -52,6 +57,7 @@ def enable_inspector(
         dependencies=dependencies,
     )
     app.include_router(router)
+    install_tailora_docs(app, inspector_prefix=prefix)
 
     if engine is not None:
         try:

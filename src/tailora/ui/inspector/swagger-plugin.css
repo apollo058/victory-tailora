@@ -1,0 +1,63 @@
+/* Swagger UI 내부 Tailora 탭의 레이아웃과 좁은 화면 동작을 정의합니다. */
+.tailora-swagger-tabs {
+  display: flex;
+  gap: 8px;
+  max-width: 1460px;
+  margin: 16px auto;
+  padding: 0 20px;
+}
+
+.tailora-swagger-tab {
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid #3b82f6;
+  border-radius: 6px;
+  color: #1d4ed8;
+  background: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tailora-swagger-tab[aria-selected="true"] {
+  color: #ffffff;
+  background: #2563eb;
+}
+
+.tailora-swagger-tab:focus-visible {
+  outline: 3px solid #f59e0b;
+  outline-offset: 2px;
+}
+
+.tailora-swagger-panel[hidden] {
+  display: none;
+}
+
+.tailora-swagger-frame {
+  display: block;
+  width: 100%;
+  min-height: 720px;
+  border: 0;
+}
+
+#tailora-plugin-warning {
+  max-width: 1460px;
+  margin: 16px auto;
+  padding: 12px 20px;
+  color: #7c2d12;
+  background: #ffedd5;
+}
+
+@media (max-width: 700px) {
+  .tailora-swagger-tabs {
+    padding: 0 12px;
+  }
+
+  .tailora-swagger-tab {
+    flex: 1;
+  }
+
+  .tailora-swagger-frame {
+    min-height: 840px;
+  }
+}
