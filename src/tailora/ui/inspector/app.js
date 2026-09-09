@@ -45,8 +45,8 @@
       return await resp.json();
     },
 
-    async fetchRequests(limit = 20) {
-      const resp = await fetch(`${BASE_PATH}/requests?limit=${limit}`, { cache: 'no-store' });
+    async fetchRequests() {
+      const resp = await fetch(`${BASE_PATH}/requests`, { cache: 'no-store' });
       if (!resp.ok) {
         throw new Error(`Failed to fetch requests: ${resp.status}`);
       }
@@ -549,7 +549,7 @@
         renderer.updateStatusPill('ok', `Active (${health.stored_requests}/${health.capacity})`);
 
         // 2. 최근 요청 목록 조회
-        const data = await api.fetchRequests(20);
+        const data = await api.fetchRequests();
         if (currentToken !== state.token) return;
 
         state.requests = data.items || [];

@@ -108,7 +108,7 @@ def test_inspector_is_loaded_only_after_its_tab_is_selected(
         ),
     ).to_be_visible()
     assert f"{live_example_url}/__tailora/health" in inspector_requests
-    assert f"{live_example_url}/__tailora/requests?limit=20" in inspector_requests
+    assert f"{live_example_url}/__tailora/requests" in inspector_requests
 
 
 def test_inspector_tab_is_usable_in_a_narrow_viewport(

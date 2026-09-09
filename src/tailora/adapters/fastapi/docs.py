@@ -6,6 +6,9 @@ import json
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 
+from tailora.adapters.fastapi.security import is_inspector_access_allowed
+from tailora.config import AccessCheck
+
 SUPPORTED_SWAGGER_UI_VERSION = "5.17.14"
 _DEFAULT_DOCS_ROUTE_NAME = "swagger_ui_html"
 _TAILORA_DOCS_ROUTE_NAME = "tailora_swagger_ui_html"
@@ -17,7 +20,11 @@ def get_docs_excluded_paths(app: FastAPI) -> tuple[str, ...]:
     return tuple(path for path in paths if path is not None)
 
 
-def install_tailora_docs(app: FastAPI, inspector_prefix: str) -> bool:
+def install_tailora_docs(
+    app: FastAPI,
+    inspector_prefix: str,
+    access_check: AccessCheck | None = None,
+) -> bool:
     """기본 Swagger UI docs route를 Tailora plugin이 포함된 route로 교체한다."""
     docs_url = app.docs_url
     if docs_url is None or app.openapi_url is None:
@@ -26,7 +33,7 @@ def install_tailora_docs(app: FastAPI, inspector_prefix: str) -> bool:
     if not _remove_default_docs_route(app, docs_url):
         return False
 
-    endpoint = _create_docs_endpoint(app, inspector_prefix)
+    endpoint = _create_docs_endpoint(app, inspector_prefix, access_check)
     app.add_api_route(
         docs_url,
         endpoint,
@@ -48,16 +55,25 @@ def _remove_default_docs_route(app: FastAPI, docs_url: str) -> bool:
     return False
 
 
-def _create_docs_endpoint(app: FastAPI, inspector_prefix: str):
+def _create_docs_endpoint(
+    app: FastAPI,
+    inspector_prefix: str,
+    access_check: AccessCheck | None,
+):
     """요청의 root path를 반영해 Swagger UI HTML을 반환하는 endpoint를 만든다."""
 
     async def tailora_swagger_ui(request: Request) -> HTMLResponse:
         """현재 요청의 proxy root path를 반영한 docs HTML을 반환한다."""
         root_path = str(request.scope.get("root_path", ""))
+        include_inspector = await is_inspector_access_allowed(
+            request,
+            access_check,
+        )
         content = render_tailora_swagger_ui_html(
             openapi_url=app.openapi_url or "/openapi.json",
             inspector_prefix=inspector_prefix,
             root_path=root_path,
+            include_inspector=include_inspector,
         )
         return HTMLResponse(content=content)
 
@@ -68,6 +84,7 @@ def render_tailora_swagger_ui_html(
     openapi_url: str,
     inspector_prefix: str,
     root_path: str = "",
+    include_inspector: bool = True,
 ) -> str:
     """Tailora plugin을 등록한 Swagger UI HTML을 안전한 URL 설정과 함께 생성한다."""
     inspector_url = _join_root_path(root_path, inspector_prefix)
@@ -76,6 +93,12 @@ def render_tailora_swagger_ui_html(
     swagger_base_url = (
         f"https://cdn.jsdelivr.net/npm/swagger-ui-dist@{SUPPORTED_SWAGGER_UI_VERSION}"
     )
+    if not include_inspector:
+        return _render_base_docs_html(
+            openapi_url=_join_root_path(root_path, openapi_url),
+            swagger_css_url=f"{swagger_base_url}/swagger-ui.css",
+            swagger_js_url=f"{swagger_base_url}/swagger-ui-bundle.js",
+        )
     return _render_docs_html(
         openapi_url=_join_root_path(root_path, openapi_url),
         inspector_url=inspector_url,
@@ -84,6 +107,44 @@ def render_tailora_swagger_ui_html(
         swagger_css_url=f"{swagger_base_url}/swagger-ui.css",
         swagger_js_url=f"{swagger_base_url}/swagger-ui-bundle.js",
     )
+
+
+def _render_base_docs_html(
+    openapi_url: str,
+    swagger_css_url: str,
+    swagger_js_url: str,
+) -> str:
+    """Inspector plugin을 노출하지 않는 기본 Swagger UI HTML을 만든다."""
+    safe_openapi_url = _safe_script_json(openapi_url)
+    safe_css_url, safe_js_url = _escape_asset_urls(
+        swagger_css_url,
+        swagger_js_url,
+    )
+    return f"""<!doctype html>
+<html lang=\"ko\">
+<head>
+  <meta charset=\"utf-8\">
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+  <title>API Docs</title>
+  <link rel=\"stylesheet\" href=\"{safe_css_url}\">
+</head>
+<body>
+  <div id=\"swagger-ui\"></div>
+  <script src=\"{safe_js_url}\"></script>
+  <script>
+    window.ui = SwaggerUIBundle({{
+      url: {safe_openapi_url},
+      dom_id: \"#swagger-ui\",
+      deepLinking: true,
+      presets: [
+        SwaggerUIBundle.presets.apis,
+        SwaggerUIBundle.SwaggerUIStandalonePreset
+      ],
+      layout: \"BaseLayout\"
+    }});
+  </script>
+</body>
+</html>"""
 
 
 def _join_root_path(root_path: str, path: str) -> str:

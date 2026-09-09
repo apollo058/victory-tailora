@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 import httpx
+import pytest
 
 from tailora.adapters.fastapi.middleware import TailoraMiddleware
 from tailora.core.context import record_query
@@ -27,14 +28,8 @@ def make_query(sequence: int = 1, statement: str = "SELECT 1") -> QueryEvent:
     )
 
 
-def create_test_app(
-    store: RingBuffer | None = None,
-    enabled: bool = True,
-    policy: RedactionPolicy | None = None,
-) -> FastAPI:
-    """테스트용 FastAPI 앱과 Tailora 미들웨어를 구성한다."""
-    app = FastAPI(title="Test App")
-
+def _register_success_routes(app: FastAPI) -> None:
+    """정상 응답과 쿼리 수집을 검증할 라우트를 등록한다."""
     @app.get("/health")
     def health_check() -> dict[str, str]:
         """정상 동작 확인용 헬스체크 엔드포인트."""
@@ -46,6 +41,9 @@ def create_test_app(
         record_query(make_query(1, "SELECT * FROM users WHERE id = 42"))
         return {"user_id": user_id}
 
+
+def _register_error_routes(app: FastAPI) -> None:
+    """HTTP 및 서버 오류 수집을 검증할 라우트를 등록한다."""
     @app.get("/not-found")
     def not_found_route() -> None:
         """404 HTTPException을 발생하는 엔드포인트."""
@@ -73,6 +71,9 @@ def create_test_app(
         """처리되지 않은 500 예외를 발생하는 엔드포인트."""
         raise RuntimeError("Something went wrong")
 
+
+def _register_internal_routes(app: FastAPI) -> None:
+    """쿼리 보정과 Inspector 제외 경로를 검증할 라우트를 등록한다."""
     @app.get("/broken-query-sequence")
     def broken_query_route() -> dict[str, str]:
         """순서가 잘못된 쿼리를 강제로 기록하는 엔드포인트."""
@@ -85,6 +86,17 @@ def create_test_app(
         """수집 제외 대상인 Inspector 내부 엔드포인트."""
         return {"inspector": "ok"}
 
+
+def create_test_app(
+    store: RingBuffer | None = None,
+    enabled: bool = True,
+    policy: RedactionPolicy | None = None,
+) -> FastAPI:
+    """테스트용 FastAPI 앱과 Tailora 미들웨어를 구성한다."""
+    app = FastAPI(title="Test App")
+    _register_success_routes(app)
+    _register_error_routes(app)
+    _register_internal_routes(app)
     app.add_middleware(
         TailoraMiddleware,
         store=store,
@@ -245,15 +257,15 @@ def test_disabled_middleware_does_not_capture():
     assert store.size() == 0
 
 
-def test_collector_error_does_not_break_api_response():
-    """수집기 내부 오류가 발생해도 API 응답은 정상 반환되는지 확인한다."""
+def test_collector_error_does_not_break_api_response(caplog):
+    """수집 실패가 API를 깨뜨리거나 민감한 로그를 남기지 않는다."""
 
     class BrokenStore(RingBuffer):
         """이벤트 추가 시 의도적으로 실패하는 저장소."""
 
         def add(self, event: RequestEvent) -> None:
             """의도적으로 예외를 던진다."""
-            raise RuntimeError("Storage failure")
+            raise RuntimeError("Storage failure token=super-secret")
 
     app = create_test_app(store=BrokenStore(), enabled=True)
     client = TestClient(app)
@@ -262,6 +274,81 @@ def test_collector_error_does_not_break_api_response():
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+    assert "Tailora event collection failed" in caplog.text
+    assert "super-secret" not in caplog.text
+
+
+def test_query_limit_is_applied_during_request_capture():
+    """요청 처리 중 쿼리 상한을 적용하면서 전체 실행 수를 보존한다."""
+    app = FastAPI()
+    store = RingBuffer()
+    policy = RedactionPolicy(max_queries_per_request=1)
+    app.add_middleware(
+        TailoraMiddleware,
+        store=store,
+        policy=policy,
+        enabled=True,
+    )
+
+    @app.get("/many-queries")
+    def many_queries() -> dict[str, bool]:
+        """테스트용 쿼리를 여러 번 기록한다."""
+        for index in range(1, 6):
+            record_query(make_query(index))
+        return {"ok": True}
+
+    response = TestClient(app).get("/many-queries")
+
+    assert response.status_code == 200
+    event = store.list()[0]
+    assert event.query_count == 1
+    assert event.total_query_count == 5
+    assert event.is_queries_truncated is True
+
+
+def test_http_exception_object_detail_is_safely_summarized():
+    """직접 전파된 HTTPException의 객체 detail 전체를 저장하지 않는다."""
+    from tailora.adapters.fastapi.middleware import _summarize_exception
+
+    error = _summarize_exception(
+        HTTPException(
+            status_code=400,
+            detail={"password": "super-secret", "nested": {"token": "value"}},
+        ),
+    )
+
+    assert error.message == "HTTP Error Details"
+    assert "super-secret" not in repr(error)
+    assert "nested" not in repr(error)
+
+
+def test_middleware_rejects_disabled_redaction_policy():
+    """저수준 Middleware에서도 Redaction 비활성화 설정을 거부한다."""
+    app = FastAPI()
+
+    with pytest.raises(ValueError, match="redaction"):
+        TailoraMiddleware(
+            app,
+            policy=RedactionPolicy(enabled=False),
+            enabled=True,
+        )
+
+
+def test_excluded_path_matching_uses_a_path_segment_boundary():
+    """제외 prefix와 문자열만 비슷한 다른 경로는 정상적으로 수집한다."""
+    app = FastAPI()
+
+    @app.get("/__tailorax/health")
+    def similar_path() -> dict[str, str]:
+        """Inspector prefix와 비슷하지만 다른 경로의 응답을 반환한다."""
+        return {"status": "ok"}
+
+    store = RingBuffer()
+    app.add_middleware(TailoraMiddleware, store=store, enabled=True)
+    client = TestClient(app)
+
+    assert client.get("/__tailorax/health").status_code == 200
+    assert store.size() == 1
 
 
 def test_broken_query_sequence_normalized_or_handled():

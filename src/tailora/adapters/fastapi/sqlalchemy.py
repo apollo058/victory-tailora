@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 import time
+from threading import RLock
 from typing import Any
 import uuid
 
@@ -13,6 +14,7 @@ from tailora.core.privacy import make_sql_fingerprint, redact_sql_statement
 
 _STATE_KEY = "_tailora_query_state"
 _REGISTERED_ENGINES: dict[int, dict[str, Any]] = {}
+_REGISTRATION_LOCK = RLock()
 
 
 def _extract_database_name(engine: Any, override_name: str | None) -> str:
@@ -104,7 +106,7 @@ def _on_after_cursor_execute(
         if ctx is None:
             return
 
-        sequence = len(ctx.queries) + 1
+        sequence = ctx.total_query_count + 1
         query_event = _create_query_event(
             sequence=sequence,
             started_at=started_at,
@@ -148,7 +150,7 @@ def _on_handle_error(
             err_type = exc.__class__.__name__ if exc else "DatabaseError"
             error_summary = ErrorSummary(type=err_type, message=error_msg)
 
-            sequence = len(ctx.queries) + 1
+            sequence = ctx.total_query_count + 1
             query_event = _create_query_event(
                 sequence=sequence,
                 started_at=started_at,
@@ -172,47 +174,59 @@ def register_sqlalchemy_inspector(
         raise TypeError("engine must be a SQLAlchemy Engine instance")
 
     engine_id = id(engine)
-    if engine_id in _REGISTERED_ENGINES:
-        return
+    with _REGISTRATION_LOCK:
+        if engine_id in _REGISTERED_ENGINES:
+            return
 
-    db_name = _extract_database_name(engine, database_name)
+        db_name = _extract_database_name(engine, database_name)
 
-    def before_exec(conn, cursor, statement, parameters, context, executemany):
-        """커서 실행 전 훅."""
-        _on_before_cursor_execute(
-            conn, cursor, statement, parameters, context, executemany
-        )
+        def before_exec(conn, cursor, statement, parameters, context, executemany):
+            """커서 실행 전 훅."""
+            _on_before_cursor_execute(
+                conn, cursor, statement, parameters, context, executemany
+            )
 
-    def after_exec(conn, cursor, statement, parameters, context, executemany):
-        """커서 실행 후 훅."""
-        _on_after_cursor_execute(
-            conn, cursor, statement, parameters, context, executemany, db_name
-        )
+        def after_exec(conn, cursor, statement, parameters, context, executemany):
+            """커서 실행 후 훅."""
+            _on_after_cursor_execute(
+                conn, cursor, statement, parameters, context, executemany, db_name
+            )
 
-    def on_error(exception_context):
-        """에러 발생 훅."""
-        _on_handle_error(exception_context, db_name)
+        def on_error(exception_context):
+            """에러 발생 훅."""
+            _on_handle_error(exception_context, db_name)
 
-    event.listen(engine, "before_cursor_execute", before_exec)
-    event.listen(engine, "after_cursor_execute", after_exec)
-    event.listen(engine, "handle_error", on_error)
+        listeners = {
+            "before_cursor_execute": before_exec,
+            "after_cursor_execute": after_exec,
+            "handle_error": on_error,
+        }
+        registered: list[tuple[str, Any]] = []
+        try:
+            for event_name, listener in listeners.items():
+                event.listen(engine, event_name, listener)
+                registered.append((event_name, listener))
+        except Exception:
+            for event_name, listener in reversed(registered):
+                try:
+                    event.remove(engine, event_name, listener)
+                except Exception:
+                    pass
+            raise
 
-    _REGISTERED_ENGINES[engine_id] = {
-        "before_cursor_execute": before_exec,
-        "after_cursor_execute": after_exec,
-        "handle_error": on_error,
-    }
+        _REGISTERED_ENGINES[engine_id] = listeners
 
 
 def unregister_sqlalchemy_inspector(engine: Engine) -> None:
     """SQLAlchemy Engine에 등록된 쿼리 수집 리스너를 제거한다."""
     engine_id = id(engine)
-    listeners = _REGISTERED_ENGINES.pop(engine_id, None)
-    if listeners is None:
-        return
+    with _REGISTRATION_LOCK:
+        listeners = _REGISTERED_ENGINES.pop(engine_id, None)
+        if listeners is None:
+            return
 
-    for event_name, listener in listeners.items():
-        try:
-            event.remove(engine, event_name, listener)
-        except Exception:
-            pass
+        for event_name, listener in listeners.items():
+            try:
+                event.remove(engine, event_name, listener)
+            except Exception:
+                pass
