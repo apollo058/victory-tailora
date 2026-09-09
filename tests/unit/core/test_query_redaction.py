@@ -76,3 +76,31 @@ def test_blocked_query_key_names_can_be_hidden():
 
     assert "password" not in result
     assert result["page"] == REDACTED
+
+
+def test_query_parameter_key_is_limited_by_policy():
+    """쿼리 파라미터 이름이 설정한 최대 길이를 넘지 않는다."""
+    policy = RedactionPolicy(max_query_key_length=64)
+
+    result = redact_query_params({"parameter" * 20: "secret"}, policy=policy)
+
+    key = next(iter(result))
+    assert len(key) <= 64
+    assert result[key] == REDACTED
+
+
+def test_colliding_query_parameter_keys_remain_unique_and_bounded():
+    """잘린 키가 충돌해도 각 항목을 길이 제한 안에서 구분한다."""
+    policy = RedactionPolicy(max_query_key_length=64)
+    common_prefix = "parameter" * 20
+
+    result = redact_query_params(
+        {
+            f"{common_prefix}-first": "one",
+            f"{common_prefix}-second": "two",
+        },
+        policy=policy,
+    )
+
+    assert len(result) == 2
+    assert all(len(key) <= 64 for key in result)

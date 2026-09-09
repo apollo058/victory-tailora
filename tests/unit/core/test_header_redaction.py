@@ -88,3 +88,13 @@ def test_header_count_is_limited_by_policy():
     )
 
     assert len(result) == 1
+
+
+def test_non_sensitive_header_value_is_limited_by_policy():
+    """차단 대상이 아닌 헤더 값도 설정한 최대 길이를 넘지 않는다."""
+    policy = RedactionPolicy(max_header_value_length=64)
+
+    result = redact_headers({"X-Debug-Info": "a" * 200}, policy=policy)
+
+    assert len(result["X-Debug-Info"]) <= 64
+    assert "[truncated]" in result["X-Debug-Info"]

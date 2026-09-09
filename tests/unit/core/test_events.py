@@ -41,7 +41,33 @@ def test_request_event_calculates_query_summary():
     assert event.method == "GET"
     assert event.query_count == 2
     assert event.query_time_ms == pytest.approx(8.4)
+    assert event.total_query_count == 2
+    assert event.total_query_time_ms == pytest.approx(8.4)
+    assert event.is_queries_truncated is False
     assert event.queries == [first_query, second_query]
+
+
+def test_request_event_preserves_total_query_metadata_for_partial_list():
+    """일부 쿼리만 보관해도 전체 실행 횟수와 시간을 보존한다."""
+    query = make_query(1, 4.1)
+
+    event = RequestEvent(
+        request_id="req-truncated",
+        timestamp=datetime(2026, 8, 13, 10, 20, 30, tzinfo=timezone.utc),
+        framework="fastapi",
+        method="GET",
+        route_template="/users",
+        status_code=200,
+        duration_ms=20.0,
+        queries=[query],
+        total_query_count=3,
+        total_query_time_ms=12.5,
+    )
+
+    assert event.query_count == 1
+    assert event.total_query_count == 3
+    assert event.total_query_time_ms == 12.5
+    assert event.is_queries_truncated is True
 
 
 def test_request_event_supports_request_without_queries():

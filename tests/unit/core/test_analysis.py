@@ -186,6 +186,22 @@ def test_analyze_signals_metadata_and_truncation():
     assert signals["is_queries_truncated"] is False
 
 
+def test_analyze_signals_uses_preserved_total_query_metadata():
+    """일부 쿼리만 남아도 실제 실행 수를 신호와 메타데이터에 사용한다."""
+    query = make_query(1, 10.0)
+    request = make_request(duration_ms=50.0, queries=[query])
+    request.total_query_count = 12
+    request.total_query_time_ms = 240.0
+    request.is_queries_truncated = True
+
+    signals = analyze_request_signals(request)
+
+    assert signals["query_heavy"] is True
+    assert signals["analyzed_query_count"] == 1
+    assert signals["total_query_count"] == 12
+    assert signals["is_queries_truncated"] is True
+
+
 def test_summarize_request_signals():
     """목록용 경량 신호 요약 객체가 올바르게 생성되는지 확인한다."""
     policy = ThresholdPolicy(

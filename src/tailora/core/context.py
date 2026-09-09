@@ -32,6 +32,17 @@ def _require_finite_number(value: object, field_name: str) -> float:
     return number
 
 
+def _validate_query_limit(value: object) -> int | None:
+    """쿼리 보관 상한이 None이거나 0 이상의 정수인지 확인한다."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(
+            "max_queries_per_request must be a non-negative integer or None",
+        )
+    return value
+
+
 @dataclass
 class RequestContext:
     """현재 진행 중인 HTTP 요청의 수집 상태를 보관한다."""
@@ -40,6 +51,9 @@ class RequestContext:
     started_at: datetime
     start_perf: float
     queries: list[QueryEvent] = field(default_factory=list)
+    max_queries_per_request: int | None = None
+    total_query_count: int = field(init=False)
+    total_query_time_ms: float = field(init=False)
 
     def __post_init__(self) -> None:
         """컨텍스트 필드의 유효성을 검증한다."""
@@ -48,6 +62,19 @@ class RequestContext:
         self.start_perf = _require_finite_number(self.start_perf, "start_perf")
         if not isinstance(self.queries, list):
             raise ValueError("queries must be a list")
+        self.max_queries_per_request = _validate_query_limit(
+            self.max_queries_per_request,
+        )
+        valid_queries = [
+            query for query in self.queries if isinstance(query, QueryEvent)
+        ]
+        self.total_query_count = len(valid_queries)
+        self.total_query_time_ms = round(
+            sum(query.duration_ms for query in valid_queries),
+            6,
+        )
+        if self.max_queries_per_request is not None:
+            self.queries = self.queries[: self.max_queries_per_request]
 
 
 _CURRENT_CONTEXT: ContextVar[RequestContext | None] = ContextVar(
@@ -82,5 +109,11 @@ def record_query(query: QueryEvent) -> None:
         return
     context = _CURRENT_CONTEXT.get()
     if context is not None:
-        context.queries.append(query)
-
+        context.total_query_count += 1
+        context.total_query_time_ms = round(
+            context.total_query_time_ms + query.duration_ms,
+            6,
+        )
+        limit = context.max_queries_per_request
+        if limit is None or len(context.queries) < limit:
+            context.queries.append(query)

@@ -22,7 +22,7 @@ def _aggregate_routes(events: list[RequestEvent]) -> list[dict[str, Any]]:
         stats["count"] += 1
         stats["total_duration"] += event.duration_ms
         stats["max_duration"] = max(stats["max_duration"], event.duration_ms)
-        stats["total_queries"] += event.query_count
+        stats["total_queries"] += event.total_query_count
 
     results: list[dict[str, Any]] = []
     for route, stats in route_stats.items():

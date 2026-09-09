@@ -45,6 +45,24 @@ _DOLLAR_QUOTE_OPEN: re.Pattern[str] = re.compile(
 )
 
 
+def _make_unique_bounded_key(
+    key: str,
+    index: int,
+    existing: Mapping[str, str],
+    max_length: int,
+) -> str:
+    """중복 키를 정해진 길이 안에서 고유한 이름으로 바꾼다."""
+    if key not in existing:
+        return key
+    attempt = index
+    while True:
+        suffix = f"_{attempt}"
+        candidate = f"{key[: max_length - len(suffix)]}{suffix}"
+        if candidate not in existing:
+            return candidate
+        attempt += 1
+
+
 def redact_headers(
     headers: Mapping[str, str],
     policy: RedactionPolicy | None = None,
@@ -63,7 +81,10 @@ def redact_headers(
         if name.lower() in policy.blocked_headers:
             result[name] = REDACTED
         else:
-            result[name] = value
+            result[name] = truncate_str(
+                value,
+                policy.max_header_value_length,
+            ) or ""
     return result
 
 
@@ -87,8 +108,13 @@ def redact_query_params(
             policy.blocked_query_keys
         ):
             safe_key = REDACTED
-            if safe_key in result:
-                safe_key = f"{REDACTED}_{index}"
+        safe_key = truncate_str(safe_key, policy.max_query_key_length) or REDACTED
+        safe_key = _make_unique_bounded_key(
+            safe_key,
+            index,
+            result,
+            policy.max_query_key_length,
+        )
         result[safe_key] = REDACTED
     return result
 
@@ -309,6 +335,9 @@ def redact_event(
 
     return dataclasses.replace(
         event,
+        route_template=(
+            truncate_str(event.route_template, policy.max_route_length) or "/"
+        ),
         queries=redacted_queries,
         error=redact_error_summary(event.error, policy),
     )

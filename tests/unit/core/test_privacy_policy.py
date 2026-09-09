@@ -86,16 +86,33 @@ def test_custom_blocked_query_keys_are_merged_with_defaults():
     assert "token" in policy.blocked_query_keys
 
 
-def test_max_statement_length_below_minimum_is_corrected():
-    """최대 statement 길이가 최솟값 이하면 최솟값으로 보정되는지 확인한다."""
-    policy = RedactionPolicy(max_statement_length=1)
-    assert policy.max_statement_length >= 64
+def test_max_statement_length_below_minimum_is_rejected():
+    """최대 statement 길이가 안전한 최솟값보다 작으면 거부하는지 확인한다."""
+    with pytest.raises(ValueError, match="max_statement_length"):
+        RedactionPolicy(max_statement_length=1)
 
 
-def test_max_error_length_below_minimum_is_corrected():
-    """최대 오류 메시지 길이가 최솟값 이하면 최솟값으로 보정되는지 확인한다."""
-    policy = RedactionPolicy(max_error_length=1)
-    assert policy.max_error_length >= 32
+def test_max_error_length_below_minimum_is_rejected():
+    """최대 오류 메시지 길이가 안전한 최솟값보다 작으면 거부한다."""
+    with pytest.raises(ValueError, match="max_error_length"):
+        RedactionPolicy(max_error_length=1)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"max_headers": 1_001},
+        {"max_query_params": 1_001},
+        {"max_queries_per_request": 1_001},
+        {"max_route_length": 8_193},
+        {"max_header_value_length": 65_537},
+        {"max_query_key_length": 1_025},
+    ],
+)
+def test_policy_rejects_values_above_safe_upper_bounds(kwargs):
+    """Redaction 개수와 문자열 길이가 안전한 상한을 넘으면 거부한다."""
+    with pytest.raises(ValueError):
+        RedactionPolicy(**kwargs)
 
 
 @pytest.mark.parametrize(
@@ -254,7 +271,7 @@ def test_redact_event_redacts_only_queries_within_max_count(monkeypatch):
 
 
 def test_redact_event_query_count_reflects_truncation():
-    """쿼리가 잘린 경우 query_count도 줄어드는지 확인한다."""
+    """쿼리가 잘려도 전체 실행 수와 잘림 상태를 보존하는지 확인한다."""
     policy = RedactionPolicy(max_queries_per_request=2)
     queries = [make_query(i) for i in range(1, 5)]
     event = make_event(queries=queries)
@@ -262,6 +279,20 @@ def test_redact_event_query_count_reflects_truncation():
     result = redact_event(event, policy=policy)
 
     assert result.query_count == 2
+    assert result.total_query_count == 4
+    assert result.is_queries_truncated is True
+
+
+def test_redact_event_limits_route_length():
+    """요청 route가 설정한 길이를 넘으면 안전한 마커와 함께 잘라낸다."""
+    event = make_event()
+    event.route_template = "/" + "very-long-route/" * 20
+    policy = RedactionPolicy(max_route_length=64)
+
+    result = redact_event(event, policy=policy)
+
+    assert len(result.route_template) <= 64
+    assert "[truncated]" in result.route_template
 
 
 def test_redact_event_with_no_error_keeps_none():
