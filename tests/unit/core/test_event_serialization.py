@@ -52,6 +52,9 @@ def test_request_event_to_dict_uses_stable_json_fields():
         "duration_ms": 42.7,
         "query_count": 1,
         "query_time_ms": 4.1,
+        "total_query_count": 1,
+        "total_query_time_ms": 4.1,
+        "is_queries_truncated": False,
         "queries": [
             {
                 "query_id": "q-1",
@@ -75,6 +78,21 @@ def test_request_event_json_round_trip_preserves_event():
     restored = request_event_from_json(request_event_to_json(event))
 
     assert restored == event
+
+
+def test_round_trip_preserves_truncated_query_metadata():
+    """직렬화 왕복 후에도 전체 쿼리 수와 잘림 여부를 유지한다."""
+    event = make_event()
+    event.total_query_count = 3
+    event.total_query_time_ms = 12.5
+    event.is_queries_truncated = True
+
+    restored = request_event_from_json(request_event_to_json(event))
+
+    assert restored.query_count == 1
+    assert restored.total_query_count == 3
+    assert restored.total_query_time_ms == 12.5
+    assert restored.is_queries_truncated is True
 
 
 def test_request_event_from_dict_accepts_null_queries():

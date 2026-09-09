@@ -99,6 +99,9 @@ def request_event_to_dict(event: RequestEvent) -> dict[str, Any]:
         "duration_ms": event.duration_ms,
         "query_count": event.query_count,
         "query_time_ms": event.query_time_ms,
+        "total_query_count": event.total_query_count,
+        "total_query_time_ms": event.total_query_time_ms,
+        "is_queries_truncated": event.is_queries_truncated,
         "queries": [query_event_to_dict(query) for query in event.queries],
         "error": _error_to_dict(event.error),
     }
@@ -123,6 +126,8 @@ def request_event_from_dict(data: Mapping[str, Any]) -> RequestEvent:
         duration_ms=_required(data, "duration_ms"),
         queries=[query_event_from_dict(item) for item in query_data],
         error=_error_from_value(data.get("error")),
+        total_query_count=data.get("total_query_count"),
+        total_query_time_ms=data.get("total_query_time_ms"),
     )
 
 

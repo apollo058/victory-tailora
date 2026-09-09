@@ -6,7 +6,7 @@ The project aims to make request and database behavior visible while developing 
 
 ## Current status
 
-STEP 10이 완료되었습니다. `tailora` Python 패키지에는 프레임워크와 무관한
+STEP 11이 완료되었습니다. `tailora` Python 패키지에는 프레임워크와 무관한
 이벤트 모델, 헤더·쿼리 파라미터·SQL·fingerprint·오류 요약의 개인정보 마스킹,
 제한된 프로세스 내부 `RingBuffer`, 비동기 요청 컨텍스트를 격리하는 FastAPI
 요청 수집 미들웨어, SQLAlchemy Engine 쿼리 수집 hook, 읽기 전용 Inspector JSON
@@ -15,9 +15,10 @@ API(`/__tailora/*`), threshold 기반 성능 신호 분석(`slow_request`,
 FastAPI의 기존 Swagger UI에는 Inspector 탭이 추가되며, API Docs와 Try it out
 상태를 유지한 채 같은 docs URL 안에서 Inspector를 사용할 수 있습니다.
 
-STEP 11의 환경별 활성화·보안 기본값과 STEP 12의 PyPI release는 아직 진행하지
-않았습니다. SQLite를 사용하는 최소 FastAPI 예제는 `/health`와
-`/users/{user_id}`를 제공합니다.
+기본값은 비활성이며 `enabled=True`를 명시해야 수집기·API·Swagger
+plugin이 함께 켜집니다. production 활성화는 별도 확인을 요구하고,
+동기·비동기 접근 hook과 저장·응답 한도를 설정할 수 있습니다.
+STEP 12의 PyPI release와 clean environment 검증은 아직 진행하지 않았습니다.
 
 ## Development setup
 
@@ -47,9 +48,42 @@ Then open `http://127.0.0.1:8000/health`. The response should be `{"status":"ok"
 ## Swagger UI 호환성
 
 Tailora는 Swagger UI `5.17.14`의 공식 plugin과 custom layout 확장 지점을
-지원합니다. `enable_inspector(app)`를 호출하면 Inspector가 활성화된 경우에만
+지원합니다. `enable_inspector(app, enabled=True)`를 호출하면
 FastAPI가 만든 기본 Swagger docs route에 Inspector 탭을 추가합니다. Swagger UI
 core를 복사하거나 수정하지 않으며, custom docs URL과 `root_path`도 지원합니다.
+
+## 활성화와 접근 제어
+
+Inspector는 요청하기 전까지 비활성 상태입니다. 로컬 개발 환경에서는 다음처럼
+명시적으로 켜십시오.
+
+```python
+from tailora.adapters.fastapi import enable_inspector
+
+enable_inspector(app, enabled=True)
+```
+
+공유 개발 환경에서는 요청마다 실행되는 접근 hook을 설정하십시오. hook은
+`True`일 때만 허용하며, `False`·예외·잘못된 반환값은 모두 접근 거부로
+처리됩니다.
+
+```python
+async def check_inspector_access(request):
+    """세션에 관리자 표시가 있는 요청만 허용합니다."""
+    return request.session.get("is_admin") is True
+
+
+enable_inspector(
+    app,
+    enabled=True,
+    access_check=check_inspector_access,
+)
+```
+
+production에서는 `enabled=True`와 `allow_in_production=True`를 모두 지정해야
+합니다. 이 설정은 인증이나 네트워크 보호를 대신하지 않으므로, production에서
+사용하려면 `access_check`와 방화벽·사내망 제한을 함께 적용하십시오. 자세한
+보안 경계는 [보안 가이드](docs/security.md)에 정리되어 있습니다.
 
 ## Product idea
 
@@ -126,9 +160,9 @@ pip install <package-name>
 ```
 
 ```python
-from dev_inspector import enable_inspector
+from tailora.adapters.fastapi import enable_inspector
 
-enable_inspector(app)
+enable_inspector(app, enabled=True)
 ```
 
 Then the developer opens the host application's configured Swagger page and selects the Inspector tab. The UI is served as part of the Swagger UI integration; it is not a separate frontend application.

@@ -1,7 +1,9 @@
 """SQLAlchemy 쿼리 수집기의 단위 동작을 확인한다."""
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import time
+from threading import Lock
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -12,6 +14,7 @@ from tailora.adapters.fastapi.sqlalchemy import (
     register_sqlalchemy_inspector,
     unregister_sqlalchemy_inspector,
 )
+import tailora.adapters.fastapi.sqlalchemy as sqlalchemy_adapter
 from tailora.core.context import (
     RequestContext,
     get_current_context,
@@ -75,6 +78,65 @@ def test_duplicate_registration_prevented(engine):
         assert len(ctx.queries) == 1
     finally:
         reset_current_context(token)
+
+
+def test_concurrent_engine_registration_is_idempotent(engine, monkeypatch):
+    """동시에 같은 엔진을 등록해도 listener가 한 번만 추가되는지 확인한다."""
+    original_listen = sqlalchemy_adapter.event.listen
+    call_count = 0
+    count_lock = Lock()
+
+    def delayed_listen(target, event_name, listener):
+        """listener 등록 사이에 지연을 넣어 동시 호출을 재현한다."""
+        nonlocal call_count
+        with count_lock:
+            call_count += 1
+        time.sleep(0.01)
+        return original_listen(target, event_name, listener)
+
+    monkeypatch.setattr(sqlalchemy_adapter.event, "listen", delayed_listen)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [
+            executor.submit(
+                sqlalchemy_adapter.register_sqlalchemy_inspector,
+                engine,
+            )
+            for _ in range(8)
+        ]
+        for future in futures:
+            future.result()
+
+    assert call_count == 3
+
+
+def test_partial_listener_registration_is_rolled_back(engine, monkeypatch):
+    """SQLAlchemy listener 등록 중 실패하면 이미 추가한 listener를 제거한다."""
+    original_listen = sqlalchemy_adapter.event.listen
+    original_remove = sqlalchemy_adapter.event.remove
+    listen_count = 0
+    removed_events: list[str] = []
+
+    def fail_second_listener(target, event_name, listener):
+        """두 번째 listener 등록에서 실패를 재현한다."""
+        nonlocal listen_count
+        listen_count += 1
+        if listen_count == 2:
+            raise RuntimeError("listener registration failed")
+        original_listen(target, event_name, listener)
+
+    def record_listener_removal(target, event_name, listener):
+        """롤백으로 제거된 listener 종류를 기록한다."""
+        removed_events.append(event_name)
+        original_remove(target, event_name, listener)
+
+    monkeypatch.setattr(sqlalchemy_adapter.event, "listen", fail_second_listener)
+    monkeypatch.setattr(sqlalchemy_adapter.event, "remove", record_listener_removal)
+
+    with pytest.raises(RuntimeError, match="listener registration failed"):
+        register_sqlalchemy_inspector(engine)
+
+    assert removed_events == ["before_cursor_execute"]
 
 
 def test_query_ignored_when_no_active_context(engine):
@@ -162,4 +224,3 @@ def test_sql_parameters_and_literals_redacted(engine):
         assert select_query.fingerprint == "select * from users where password = ?"
     finally:
         reset_current_context(token)
-

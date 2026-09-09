@@ -16,19 +16,8 @@ from tailora.adapters.fastapi import (
 from tailora.core.store import RingBuffer
 
 
-def create_sqlite_test_app() -> tuple[FastAPI, Any, RingBuffer]:
-    """테스트용 SQLite DB와 연결된 FastAPI 애플리케이션을 생성한다."""
-    app = FastAPI(title="SQLite Test App")
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    store = RingBuffer()
-
-    enable_inspector(app, store=store, engine=engine)
-
-    # 테이블 초기화 (요청 밖에서 실행)
+def _initialize_sqlite_schema(engine: Any) -> None:
+    """요청 밖에서 SQLite 테이블과 테스트 데이터를 준비한다."""
     with engine.begin() as conn:
         conn.execute(
             text(
@@ -43,6 +32,9 @@ def create_sqlite_test_app() -> tuple[FastAPI, Any, RingBuffer]:
             text("INSERT INTO users VALUES (2, 'bob', 'user')"),
         )
 
+
+def _register_sqlite_routes(app: FastAPI, engine: Any) -> None:
+    """성공·생성·실패 SQL 흐름을 검증할 FastAPI 라우트를 등록한다."""
     @app.get("/users/{user_id}")
     def get_user(user_id: int) -> dict[str, str]:
         """사용자 단건 조회 엔드포인트."""
@@ -72,7 +64,52 @@ def create_sqlite_test_app() -> tuple[FastAPI, Any, RingBuffer]:
         with engine.connect() as conn:
             conn.execute(text("SELECT invalid_column FROM users"))
 
+
+def create_sqlite_test_app() -> tuple[FastAPI, Any, RingBuffer]:
+    """테스트용 SQLite DB와 연결된 FastAPI 애플리케이션을 생성한다."""
+    app = FastAPI(title="SQLite Test App")
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    store = RingBuffer()
+    enable_inspector(app, store=store, engine=engine, enabled=True)
+    _initialize_sqlite_schema(engine)
+    _register_sqlite_routes(app, engine)
+
     return app, engine, store
+
+
+def test_sql_parameters_are_never_stored():
+    """SQLAlchemy 바인딩 parameter의 원문을 쿼리 이벤트에 저장하지 않는다."""
+    app = FastAPI()
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    store = RingBuffer()
+    enable_inspector(app, store=store, engine=engine, enabled=True)
+
+    @app.get("/parameterized")
+    def parameterized_query() -> dict[str, bool]:
+        """민감한 바인딩 값으로 SQL을 실행한다."""
+        with engine.connect() as connection:
+            connection.execute(
+                text("SELECT :secret_value"),
+                {"secret_value": "sql-parameter-super-secret"},
+            )
+        return {"ok": True}
+
+    try:
+        response = TestClient(app).get("/parameterized")
+
+        assert response.status_code == 200
+        assert "sql-parameter-super-secret" not in repr(store.list()[0])
+    finally:
+        unregister_sqlalchemy_inspector(engine)
+        engine.dispose()
 
 
 def test_sqlite_queries_captured_in_request_event():

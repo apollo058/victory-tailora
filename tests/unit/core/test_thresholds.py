@@ -80,3 +80,19 @@ def test_invalid_threshold_policy_raises_value_error(kwargs, match_msg):
     """유효하지 않은 임계값 입력 시 ValueError 발생을 확인한다."""
     with pytest.raises(ValueError, match=match_msg):
         ThresholdPolicy(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"slow_request_ms": 86_400_001.0},
+        {"slow_query_ms": 86_400_001.0},
+        {"query_heavy_time_ms": 86_400_001.0},
+        {"duplicate_query_threshold": 1_001},
+        {"query_heavy_count": 1_001},
+    ],
+)
+def test_threshold_policy_rejects_values_above_safe_upper_bounds(kwargs):
+    """진단을 사실상 무효화할 정도로 큰 임계값을 거부한다."""
+    with pytest.raises(ValueError, match="must be at most"):
+        ThresholdPolicy(**kwargs)

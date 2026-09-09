@@ -10,7 +10,7 @@ from tailora.core.store import RingBuffer
 def test_enable_inspector_without_engine():
     """엔진 없이 호출 시 SQLAlchemy 없이도 정상 동작하는지 확인한다."""
     app = FastAPI()
-    store = enable_inspector(app)
+    store = enable_inspector(app, enabled=True)
 
     assert isinstance(store, RingBuffer)
 
@@ -21,4 +21,3 @@ def test_lazy_attribute_access_nonexistent():
 
     with pytest.raises(AttributeError, match="has no attribute 'nonexistent'"):
         _ = adapter.nonexistent
-

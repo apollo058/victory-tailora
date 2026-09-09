@@ -52,6 +52,26 @@ def _validate_status_code(value: Any) -> int:
     return value
 
 
+def _validate_total_query_count(value: Any, analyzed_count: int) -> int:
+    """전체 쿼리 수가 분석된 쿼리 수 이상의 정수인지 확인한다."""
+    resolved = analyzed_count if value is None else value
+    if isinstance(resolved, bool) or not isinstance(resolved, int):
+        raise ValueError("total_query_count must be an integer")
+    if resolved < analyzed_count:
+        raise ValueError("total_query_count must include all analyzed queries")
+    return resolved
+
+
+def _validate_total_query_time(value: Any, analyzed_time: float) -> float:
+    """전체 쿼리 시간이 분석된 쿼리 시간 이상인지 확인한다."""
+    resolved = analyzed_time if value is None else _validate_duration(value)
+    if resolved + 0.000001 < analyzed_time:
+        raise ValueError(
+            "total_query_time_ms must include all analyzed query time",
+        )
+    return resolved
+
+
 @dataclass
 class ErrorSummary:
     """민감한 원문을 포함하지 않는 오류 요약을 나타낸다."""
@@ -126,8 +146,11 @@ class RequestEvent:
     duration_ms: float
     queries: list[QueryEvent] = field(default_factory=list)
     error: ErrorSummary | None = None
+    total_query_count: int | None = None
+    total_query_time_ms: float | None = None
     query_count: int = field(init=False)
     query_time_ms: float = field(init=False)
+    is_queries_truncated: bool = field(init=False)
 
     def __post_init__(self) -> None:
         """요청 필드를 검증하고 쿼리 집계값을 계산한다."""
@@ -152,6 +175,15 @@ class RequestEvent:
             sum(query.duration_ms for query in self.queries),
             6,
         )
+        self.total_query_count = _validate_total_query_count(
+            self.total_query_count,
+            self.query_count,
+        )
+        self.total_query_time_ms = _validate_total_query_time(
+            self.total_query_time_ms,
+            self.query_time_ms,
+        )
+        self.is_queries_truncated = self.total_query_count > self.query_count
 
     @staticmethod
     def _normalize_framework(value: str | Framework) -> str:

@@ -4,6 +4,8 @@ import asyncio
 from datetime import datetime, timezone
 import time
 
+import pytest
+
 from tailora.core.context import (
     RequestContext,
     get_current_context,
@@ -71,6 +73,28 @@ def test_record_query_appends_to_current_context():
         assert len(context.queries) == 2
         assert context.queries[0] is q1
         assert context.queries[1] is q2
+    finally:
+        reset_current_context(token)
+
+
+def test_record_query_applies_limit_while_preserving_totals():
+    """쿼리 보관 상한을 즉시 적용하면서 전체 실행 수와 시간을 보존한다."""
+    context = RequestContext(
+        request_id="req-limited",
+        started_at=EVENT_TIME,
+        start_perf=time.perf_counter(),
+        max_queries_per_request=2,
+    )
+
+    token = set_current_context(context)
+    try:
+        record_query(make_query(1))
+        record_query(make_query(2))
+        record_query(make_query(3))
+
+        assert len(context.queries) == 2
+        assert context.total_query_count == 3
+        assert context.total_query_time_ms == pytest.approx(7.5)
     finally:
         reset_current_context(token)
 

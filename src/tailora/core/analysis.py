@@ -79,8 +79,8 @@ def analyze_request_signals(
         resolved_policy.duplicate_query_threshold,
     )
     is_heavy, heavy_reasons = _check_query_heavy(
-        event.query_count,
-        event.query_time_ms,
+        event.total_query_count,
+        event.total_query_time_ms,
         resolved_policy.query_heavy_count,
         resolved_policy.query_heavy_time_ms,
     )
@@ -103,8 +103,8 @@ def analyze_request_signals(
         "query_heavy_reasons": heavy_reasons,
         "applied_thresholds": applied_thresholds,
         "analyzed_query_count": len(event.queries),
-        "total_query_count": event.query_count,
-        "is_queries_truncated": len(event.queries) < event.query_count,
+        "total_query_count": event.total_query_count,
+        "is_queries_truncated": event.is_queries_truncated,
     }
 
 

@@ -3,6 +3,7 @@
 import dataclasses
 from datetime import datetime, timezone
 import json
+import logging
 import time
 from typing import Any, Callable, Coroutine
 import uuid
@@ -27,10 +28,32 @@ ASGIApp = Callable[[Scope, Receive, Send], Coroutine[Any, Any, None]]
 
 DEFAULT_EXCLUDED_PATHS: tuple[str, ...] = ("/__tailora",)
 
+logger = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass
+class _CaptureState:
+    """한 HTTP 요청을 측정하는 동안 변하는 상태를 보관한다."""
+
+    request_id: str
+    started_at: datetime
+    start_perf: float
+    method: str
+    context: RequestContext
+    token: Any
+    status_code: int = 500
+    error_summary: ErrorSummary | None = None
+
 
 def _is_excluded_path(path: str, prefixes: tuple[str, ...]) -> bool:
     """요청 경로가 수집 제외 대상 경로로 시작하는지 확인한다."""
-    return any(path.startswith(prefix) for prefix in prefixes)
+    for prefix in prefixes:
+        normalized = prefix.rstrip("/") or "/"
+        if normalized == "/" or path == normalized:
+            return True
+        if path.startswith(f"{normalized}/"):
+            return True
+    return False
 
 
 def _extract_route_template(scope: Scope, fallback_path: str) -> str:
@@ -47,7 +70,11 @@ def _extract_route_template(scope: Scope, fallback_path: str) -> str:
 def _summarize_exception(exc: Exception) -> ErrorSummary:
     """발생한 예외 객체에서 안전한 ErrorSummary를 만든다."""
     if isinstance(exc, HTTPException):
-        detail = str(exc.detail) if exc.detail is not None else None
+        detail = (
+            _extract_detail_message(exc.detail)
+            if exc.detail is not None
+            else None
+        )
         return ErrorSummary(type=exc.__class__.__name__, message=detail)
     message = str(exc) if str(exc) else None
     return ErrorSummary(type=exc.__class__.__name__, message=message)
@@ -117,6 +144,8 @@ def _create_request_event(
     status_code: int,
     queries: list[QueryEvent],
     error: ErrorSummary | None,
+    total_query_count: int | None = None,
+    total_query_time_ms: float | None = None,
 ) -> RequestEvent:
     """수집된 측정 정보로 RequestEvent 객체를 완성한다."""
     safe_queries = _safe_normalize_queries(queries)
@@ -130,6 +159,8 @@ def _create_request_event(
         duration_ms=duration_ms,
         queries=safe_queries,
         error=error,
+        total_query_count=total_query_count,
+        total_query_time_ms=total_query_time_ms,
     )
 
 
@@ -143,8 +174,7 @@ def _safe_store_event(
         redacted = redact_event(event, policy)
         store.add(redacted)
     except Exception:
-        # 수집기 내부의 오류가 API 응답을 깨뜨려서는 안 된다.
-        pass
+        logger.warning("Tailora event collection failed")
 
 
 class TailoraMiddleware:
@@ -162,7 +192,11 @@ class TailoraMiddleware:
         self.app = app
         self.store = store if store is not None else RingBuffer()
         self.policy = policy if policy is not None else RedactionPolicy()
+        if not isinstance(self.policy, RedactionPolicy):
+            raise ValueError("policy must be a RedactionPolicy")
         self.enabled = enabled
+        if self.enabled and not self.policy.enabled:
+            raise ValueError("redaction policy must remain enabled")
         self.excluded_paths = excluded_paths
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -171,8 +205,12 @@ class TailoraMiddleware:
             await self.app(scope, receive, send)
             return
 
-        raw_path = scope.get("root_path", "") + scope.get("path", "")
-        if _is_excluded_path(raw_path, self.excluded_paths):
+        request_path = str(scope.get("path", ""))
+        raw_path = str(scope.get("root_path", "")) + request_path
+        if _is_excluded_path(
+            raw_path,
+            self.excluded_paths,
+        ) or _is_excluded_path(request_path, self.excluded_paths):
             await self.app(scope, receive, send)
             return
 
@@ -186,90 +224,88 @@ class TailoraMiddleware:
         raw_path: str,
     ) -> None:
         """단일 HTTP 요청의 컨텍스트를 생성하고 완료 후 이벤트를 저장한다."""
+        state = self._start_capture(scope)
+        wrapped_send = self._wrap_send(send, state)
+        try:
+            await self.app(scope, receive, wrapped_send)
+        except HTTPException as error:
+            state.status_code = error.status_code
+            state.error_summary = _summarize_exception(error)
+            raise
+        except Exception as error:
+            state.status_code = 500
+            state.error_summary = _summarize_exception(error)
+            raise
+        finally:
+            self._finalize_request(scope, raw_path, state)
+
+    def _start_capture(self, scope: Scope) -> _CaptureState:
+        """요청 ID, 시각, 쿼리 컨텍스트를 생성해 측정을 시작한다."""
         request_id = str(uuid.uuid4())
         started_at = datetime.now(timezone.utc)
         start_perf = time.perf_counter()
         method = str(scope.get("method", "GET")).upper()
-
         context = RequestContext(
             request_id=request_id,
             started_at=started_at,
             start_perf=start_perf,
+            max_queries_per_request=self.policy.max_queries_per_request,
         )
         token = set_current_context(context)
-        status_code: int = 500
-        error_summary: ErrorSummary | None = None
+        return _CaptureState(
+            request_id=request_id,
+            started_at=started_at,
+            start_perf=start_perf,
+            method=method,
+            context=context,
+            token=token,
+        )
 
+    def _wrap_send(self, send: Send, state: _CaptureState) -> Send:
+        """응답 상태와 안전한 오류 요약만 측정하는 send wrapper를 만든다."""
         async def wrapped_send(message: dict[str, Any]) -> None:
             """응답 상태 코드와 에러 메시지를 가로채고 원래 send를 호출한다."""
-            nonlocal status_code, error_summary
             msg_type = message.get("type")
             if msg_type == "http.response.start":
-                status_code = int(message.get("status", 200))
-            elif msg_type == "http.response.body" and status_code >= 400:
-                if error_summary is None:
+                state.status_code = int(message.get("status", 200))
+            elif msg_type == "http.response.body" and state.status_code >= 400:
+                if state.error_summary is None:
                     body_chunk = message.get("body", b"")
-                    error_summary = _extract_error_from_body(
+                    state.error_summary = _extract_error_from_body(
                         body_chunk,
-                        status_code,
+                        state.status_code,
                         self.policy,
                     )
             await send(message)
-
-        try:
-            await self.app(scope, receive, wrapped_send)
-        except HTTPException as exc:
-            status_code = exc.status_code
-            error_summary = _summarize_exception(exc)
-            raise
-        except Exception as exc:
-            status_code = 500
-            error_summary = _summarize_exception(exc)
-            raise
-        finally:
-            self._finalize_request(
-                scope=scope,
-                raw_path=raw_path,
-                request_id=request_id,
-                started_at=started_at,
-                start_perf=start_perf,
-                method=method,
-                status_code=status_code,
-                context=context,
-                error_summary=error_summary,
-                token=token,
-            )
+        return wrapped_send
 
     def _finalize_request(
         self,
         scope: Scope,
         raw_path: str,
-        request_id: str,
-        started_at: datetime,
-        start_perf: float,
-        method: str,
-        status_code: int,
-        context: RequestContext,
-        error_summary: ErrorSummary | None,
-        token: Any,
+        state: _CaptureState,
     ) -> None:
         """요청 측정을 종료하고 이벤트를 완성하여 저장한 뒤 컨텍스트를 복원한다."""
         try:
-            duration_ms = round((time.perf_counter() - start_perf) * 1000.0, 6)
+            duration_ms = round(
+                (time.perf_counter() - state.start_perf) * 1000.0,
+                6,
+            )
             route_template = _extract_route_template(scope, raw_path)
             event = _create_request_event(
-                request_id=request_id,
-                started_at=started_at,
+                request_id=state.request_id,
+                started_at=state.started_at,
                 duration_ms=duration_ms,
-                method=method,
+                method=state.method,
                 route_template=route_template,
-                status_code=status_code,
-                queries=context.queries,
-                error=error_summary,
+                status_code=state.status_code,
+                queries=state.context.queries,
+                error=state.error_summary,
+                total_query_count=state.context.total_query_count,
+                total_query_time_ms=state.context.total_query_time_ms,
             )
             _safe_store_event(self.store, event, self.policy)
         except Exception:
-            # 이벤트 생성 및 저장 실패 등 모든 수집기 내부 오류를 흡수한다.
-            pass
+            logger.warning("Tailora event finalization failed")
         finally:
-            reset_current_context(token)
+            reset_current_context(state.token)

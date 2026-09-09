@@ -23,7 +23,7 @@ with engine.begin() as conn:
         text("INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob')"),
     )
 
-enable_inspector(app, store=store, engine=engine)
+enable_inspector(app, store=store, engine=engine, enabled=True)
 
 
 @app.get("/health")

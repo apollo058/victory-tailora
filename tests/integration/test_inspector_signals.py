@@ -60,6 +60,7 @@ def create_signals_app(
         app,
         store=store,
         threshold_policy=threshold_policy,
+        enabled=True,
     )
     return app, resolved_store
 
@@ -157,4 +158,3 @@ def test_custom_threshold_policy_applied_to_api():
     data = response.json()
 
     assert data["items"][0]["signals"]["slow_request"] is True
-
