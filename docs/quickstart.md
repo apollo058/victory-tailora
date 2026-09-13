@@ -67,9 +67,10 @@ app = FastAPI()
 enable_inspector(app, engine=engine, enabled=True)
 ```
 
-이후 호스트 앱의 docs URL을 열고 Inspector 탭을 선택하십시오. 공유 개발 환경이나
-production에서는 `access_check`, 네트워크 제한, `allow_in_production=True`를
-함께 검토하십시오. `enabled=True`만으로 인증이 추가되지는 않습니다.
+이후 호스트 앱의 docs URL을 열고 Inspector 탭을 선택하십시오. 공유 개발 환경에서는
+`access_check`를 설정하십시오. production에서는 `access_check`와 네트워크 제한을
+적용하고 `allow_in_production=True`를 함께 지정해야 합니다. `enabled=True`만으로
+인증이 추가되지는 않습니다.
 
 ## 개발 설치와 pre-release 설치 구분
 

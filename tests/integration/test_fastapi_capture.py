@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 import httpx
 import pytest
+from starlette.responses import StreamingResponse
 
 from tailora.adapters.fastapi.middleware import TailoraMiddleware
 from tailora.core.context import record_query
@@ -214,6 +215,35 @@ def test_http_exception_with_sensitive_detail_redacted():
     assert "Invalid token provided" in (event.error.message or "")
 
 
+def test_split_error_response_body_is_summarized_after_all_chunks():
+    """여러 chunk로 나뉜 오류 JSON을 마지막에 합쳐 안전하게 요약한다."""
+    app = FastAPI()
+    store = RingBuffer()
+
+    @app.get("/split-error")
+    def split_error_route() -> StreamingResponse:
+        """여러 chunk로 나뉜 JSON 오류 응답을 반환한다."""
+
+        async def error_body():
+            """오류 JSON을 두 개의 chunk로 나누어 반환한다."""
+            yield b'{"detail":"split '
+            yield b'error"}'
+
+        return StreamingResponse(error_body(), status_code=400)
+
+    app.add_middleware(
+        TailoraMiddleware,
+        store=store,
+        enabled=True,
+    )
+    response = TestClient(app).get("/split-error")
+
+    assert response.status_code == 400
+    event = store.list()[0]
+    assert event.error is not None
+    assert event.error.message == "split error"
+
+
 def test_unhandled_exception_captured_and_reraised():
     """처리되지 않은 예외 발생 시 500으로 기록되고 에러 요약이 저장되는지 확인한다."""
     store = RingBuffer()
@@ -243,6 +273,26 @@ def test_excluded_paths_not_captured():
 
     assert response.status_code == 200
     assert store.size() == 0
+
+
+def test_unmatched_path_does_not_store_raw_path_as_route_template():
+    """라우트가 없는 요청의 민감한 실제 경로를 이벤트에 저장하지 않는다."""
+    app = FastAPI()
+    store = RingBuffer()
+    app.add_middleware(
+        TailoraMiddleware,
+        store=store,
+        enabled=True,
+    )
+    client = TestClient(app, raise_server_exceptions=False)
+    secret = "reset-token=super-secret-value"
+
+    response = client.get(f"/missing/{secret}")
+
+    assert response.status_code == 404
+    event = store.list()[0]
+    assert event.route_template == "/<unmatched>"
+    assert secret not in repr(event)
 
 
 def test_disabled_middleware_does_not_capture():

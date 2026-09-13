@@ -5,6 +5,7 @@ import time
 from threading import RLock
 from typing import Any
 import uuid
+import weakref
 
 from sqlalchemy import Engine, event
 
@@ -13,7 +14,10 @@ from tailora.core.events import ErrorSummary, QueryEvent
 from tailora.core.privacy import make_sql_fingerprint, redact_sql_statement
 
 _STATE_KEY = "_tailora_query_state"
-_REGISTERED_ENGINES: dict[int, dict[str, Any]] = {}
+_REGISTERED_ENGINES: weakref.WeakKeyDictionary[
+    Engine,
+    dict[str, Any],
+] = weakref.WeakKeyDictionary()
 _REGISTRATION_LOCK = RLock()
 
 
@@ -173,9 +177,8 @@ def register_sqlalchemy_inspector(
     if not isinstance(engine, Engine):
         raise TypeError("engine must be a SQLAlchemy Engine instance")
 
-    engine_id = id(engine)
     with _REGISTRATION_LOCK:
-        if engine_id in _REGISTERED_ENGINES:
+        if engine in _REGISTERED_ENGINES:
             return
 
         db_name = _extract_database_name(engine, database_name)
@@ -214,14 +217,13 @@ def register_sqlalchemy_inspector(
                     pass
             raise
 
-        _REGISTERED_ENGINES[engine_id] = listeners
+        _REGISTERED_ENGINES[engine] = listeners
 
 
 def unregister_sqlalchemy_inspector(engine: Engine) -> None:
     """SQLAlchemy Engine에 등록된 쿼리 수집 리스너를 제거한다."""
-    engine_id = id(engine)
     with _REGISTRATION_LOCK:
-        listeners = _REGISTERED_ENGINES.pop(engine_id, None)
+        listeners = _REGISTERED_ENGINES.pop(engine, None)
         if listeners is None:
             return
 

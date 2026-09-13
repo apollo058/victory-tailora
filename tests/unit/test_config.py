@@ -90,10 +90,15 @@ def test_config_requires_second_confirmation_in_production():
     with pytest.raises(ValueError, match="allow_in_production"):
         InspectorConfig(enabled=True, environment="production")
 
+    def allow_production_request(request):
+        """production 설정 테스트 요청을 허용한다."""
+        return True
+
     config = InspectorConfig(
         enabled=True,
         environment="production",
         allow_in_production=True,
+        access_check=allow_production_request,
     )
 
     assert config.enabled is True

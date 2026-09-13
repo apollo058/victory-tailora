@@ -27,6 +27,8 @@ Send = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
 ASGIApp = Callable[[Scope, Receive, Send], Coroutine[Any, Any, None]]
 
 DEFAULT_EXCLUDED_PATHS: tuple[str, ...] = ("/__tailora",)
+MAX_ERROR_BODY_BYTES = 16 * 1024
+_NO_STORE_HEADER = (b"cache-control", b"no-store")
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,7 @@ class _CaptureState:
     token: Any
     status_code: int = 500
     error_summary: ErrorSummary | None = None
+    error_body: bytearray = dataclasses.field(default_factory=bytearray)
 
 
 def _is_excluded_path(path: str, prefixes: tuple[str, ...]) -> bool:
@@ -56,7 +59,7 @@ def _is_excluded_path(path: str, prefixes: tuple[str, ...]) -> bool:
     return False
 
 
-def _extract_route_template(scope: Scope, fallback_path: str) -> str:
+def _extract_route_template(scope: Scope) -> str:
     """FastAPI 라우팅 정보에서 경로 패턴(예: /users/{id})을 추출한다."""
     route = scope.get("route")
     if route is not None:
@@ -64,7 +67,7 @@ def _extract_route_template(scope: Scope, fallback_path: str) -> str:
             return route.path_format
         if hasattr(route, "path") and isinstance(route.path, str):
             return route.path
-    return fallback_path or "/"
+    return "/<unmatched>"
 
 
 def _summarize_exception(exc: Exception) -> ErrorSummary:
@@ -120,6 +123,27 @@ def _extract_error_from_body(
     err_type = "HTTPException" if status_code < 500 else "HTTPError"
     raw_summary = ErrorSummary(type=err_type, message=raw_message)
     return redact_error_summary(raw_summary, policy)
+
+
+def _append_error_body(state: _CaptureState, message: dict[str, Any]) -> None:
+    """오류 응답 본문을 제한된 크기까지 누적한다."""
+    body = message.get("body", b"")
+    if not isinstance(body, (bytes, bytearray, memoryview)):
+        return
+    remaining = MAX_ERROR_BODY_BYTES - len(state.error_body)
+    if remaining > 0:
+        state.error_body.extend(bytes(body)[:remaining])
+
+
+def _add_no_store_header(message: dict[str, Any]) -> dict[str, Any]:
+    """응답 시작 메시지에 중간 캐시 방지 헤더를 추가한다."""
+    headers = list(message.get("headers") or [])
+    if not any(
+        isinstance(name, bytes) and name.lower() == _NO_STORE_HEADER[0]
+        for name, _ in headers
+    ):
+        headers.append(_NO_STORE_HEADER)
+    return {**message, "headers": headers}
 
 
 def _safe_normalize_queries(queries: list[QueryEvent]) -> list[QueryEvent]:
@@ -211,17 +235,16 @@ class TailoraMiddleware:
             raw_path,
             self.excluded_paths,
         ) or _is_excluded_path(request_path, self.excluded_paths):
-            await self.app(scope, receive, send)
+            await self.app(scope, receive, self._wrap_no_store_send(send))
             return
 
-        await self._capture_request(scope, receive, send, raw_path)
+        await self._capture_request(scope, receive, send)
 
     async def _capture_request(
         self,
         scope: Scope,
         receive: Receive,
         send: Send,
-        raw_path: str,
     ) -> None:
         """단일 HTTP 요청의 컨텍스트를 생성하고 완료 후 이벤트를 저장한다."""
         state = self._start_capture(scope)
@@ -237,7 +260,7 @@ class TailoraMiddleware:
             state.error_summary = _summarize_exception(error)
             raise
         finally:
-            self._finalize_request(scope, raw_path, state)
+            self._finalize_request(scope, state)
 
     def _start_capture(self, scope: Scope) -> _CaptureState:
         """요청 ID, 시각, 쿼리 컨텍스트를 생성해 측정을 시작한다."""
@@ -270,19 +293,29 @@ class TailoraMiddleware:
                 state.status_code = int(message.get("status", 200))
             elif msg_type == "http.response.body" and state.status_code >= 400:
                 if state.error_summary is None:
-                    body_chunk = message.get("body", b"")
-                    state.error_summary = _extract_error_from_body(
-                        body_chunk,
-                        state.status_code,
-                        self.policy,
-                    )
+                    _append_error_body(state, message)
+                    if not message.get("more_body", False):
+                        state.error_summary = _extract_error_from_body(
+                            bytes(state.error_body),
+                            state.status_code,
+                            self.policy,
+                        )
             await send(message)
+        return wrapped_send
+
+    def _wrap_no_store_send(self, send: Send) -> Send:
+        """제외된 Inspector 응답에도 캐시 방지 헤더를 적용한다."""
+        async def wrapped_send(message: dict[str, Any]) -> None:
+            """응답 시작 메시지를 보강한 뒤 원래 send를 호출한다."""
+            if message.get("type") == "http.response.start":
+                message = _add_no_store_header(message)
+            await send(message)
+
         return wrapped_send
 
     def _finalize_request(
         self,
         scope: Scope,
-        raw_path: str,
         state: _CaptureState,
     ) -> None:
         """요청 측정을 종료하고 이벤트를 완성하여 저장한 뒤 컨텍스트를 복원한다."""
@@ -291,7 +324,7 @@ class TailoraMiddleware:
                 (time.perf_counter() - state.start_perf) * 1000.0,
                 6,
             )
-            route_template = _extract_route_template(scope, raw_path)
+            route_template = _extract_route_template(scope)
             event = _create_request_event(
                 request_id=state.request_id,
                 started_at=state.started_at,

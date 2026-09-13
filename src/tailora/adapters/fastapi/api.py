@@ -1,10 +1,13 @@
 """Inspector 데이터를 조회할 수 있는 FastAPI APIRouter를 제공한다."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Coroutine, Sequence
 from typing import Any
 
-from fastapi import APIRouter, Depends, Path, Query, params
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, params
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
+from fastapi.routing import APIRoute
 
 from tailora.adapters.fastapi.security import (
     create_inspector_access_dependency,
@@ -21,6 +24,38 @@ from tailora.core.policies import RedactionPolicy, ThresholdPolicy
 from tailora.core.privacy import redact_event
 from tailora.core.serialization import request_event_to_dict
 from tailora.core.store import RingBuffer
+
+_NO_STORE_HEADERS = {"Cache-Control": "no-store"}
+
+
+class _NoStoreRoute(APIRoute):
+    """Inspector route의 모든 응답에 캐시 방지 헤더를 적용한다."""
+
+    def get_route_handler(
+        self,
+    ) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        """FastAPI 기본 handler를 감싸서 오류 응답도 보강한다."""
+        original_handler = super().get_route_handler()
+
+        async def route_handler(request: Request) -> Response:
+            """정상·검증·접근 거부 응답에 no-store 헤더를 설정한다."""
+            try:
+                response = await original_handler(request)
+            except HTTPException as error:
+                response = JSONResponse(
+                    status_code=error.status_code,
+                    content={"detail": error.detail},
+                    headers=error.headers,
+                )
+            except RequestValidationError as error:
+                response = await request_validation_exception_handler(
+                    request,
+                    error,
+                )
+            _set_no_store_header(response)
+            return response
+
+        return route_handler
 
 
 def _thresholds_to_dict(policy: ThresholdPolicy) -> dict[str, Any]:
@@ -80,19 +115,26 @@ def _resolve_dependencies(
     access_check: AccessCheck | None,
 ) -> list[params.Depends]:
     """사용자 dependency와 Inspector 접근 hook을 라우터 dependency로 합친다."""
-    resolved = list(normalize_inspector_dependencies(dependencies))
+    resolved = [Depends(_set_no_store_header)]
+    resolved.extend(normalize_inspector_dependencies(dependencies))
     if access_check is not None:
         dependency = create_inspector_access_dependency(access_check)
         resolved.append(Depends(dependency))
     return resolved
 
 
+def _set_no_store_header(response: Response) -> None:
+    """Inspector 데이터 응답이 캐시되지 않도록 응답 헤더를 설정한다."""
+    response.headers["Cache-Control"] = "no-store"
+
+
 def _add_health_route(router: APIRouter, store: RingBuffer) -> None:
     """Inspector 상태와 저장소 메타데이터 조회 route를 추가한다."""
 
     @router.get("/health")
-    def health_check() -> dict[str, Any]:
+    def health_check(response: Response) -> dict[str, Any]:
         """Inspector 활성 상태와 저장소 용량 메타데이터를 반환한다."""
+        _set_no_store_header(response)
         return {
             "status": "ok",
             "stored_requests": store.size(),
@@ -112,19 +154,21 @@ def _add_list_route(
 
     @router.get("/requests")
     def list_requests(
+        response: Response,
         limit: int = Query(default=default_limit, ge=1, le=max_limit),
     ) -> dict[str, Any]:
         """최근 요청을 마스킹·신호 분석 후 최신순으로 반환한다."""
-        snapshot = store.list()
-        selected = snapshot[:limit]
+        _set_no_store_header(response)
+        selected = store.list(limit=limit)
+        total_stored_requests = store.size()
         redacted = [redact_event(event, policy) for event in selected]
         items = [_summarize_request(event, thresholds) for event in redacted]
         return {
             "items": items,
             "count": len(items),
             "limit": limit,
-            "total_stored_requests": len(snapshot),
-            "is_truncated": len(snapshot) > limit,
+            "total_stored_requests": total_stored_requests,
+            "is_truncated": total_stored_requests > limit,
             "thresholds": _thresholds_to_dict(thresholds),
         }
 
@@ -139,9 +183,11 @@ def _add_detail_route(
 
     @router.get("/requests/{request_id}")
     def get_request_detail(
+        response: Response,
         request_id: str = Path(..., description="조회할 요청 ID"),
     ) -> Any:
         """단일 요청과 연결된 쿼리·상세 신호를 반환한다."""
+        _set_no_store_header(response)
         try:
             event = store.get(request_id)
         except ValueError:
@@ -155,6 +201,7 @@ def _add_detail_route(
                         "message": "Requested event was not found.",
                     },
                 },
+                headers=_NO_STORE_HEADERS,
             )
         redacted_event = redact_event(event, policy)
         result = request_event_to_dict(redacted_event)
@@ -177,10 +224,12 @@ def _add_aggregate_route(
 
     @router.get("/aggregates")
     def get_aggregates(
+        response: Response,
         limit: int = Query(default=default_limit, ge=1, le=max_limit),
     ) -> dict[str, Any]:
         """저장된 이벤트의 경로·Fingerprint 집계와 임계값을 반환한다."""
-        events = [redact_event(event, policy) for event in store.list()]
+        _set_no_store_header(response)
+        events = [redact_event(event, policy) for event in store._latest_view()]
         aggregates = compute_aggregates(events)
         route_count = len(aggregates["routes"])
         fingerprint_count = len(aggregates["fingerprints"])
@@ -205,7 +254,11 @@ def _add_ui_routes(router: APIRouter, prefix: str) -> None:
         from tailora.ui.loader import get_inspector_asset
 
         content, content_type = get_inspector_asset("index.html", base_path=prefix)
-        return Response(content=content, media_type=content_type)
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers=_NO_STORE_HEADERS,
+        )
 
     @router.get("/{asset_name:path}", include_in_schema=False)
     def inspector_ui_asset(asset_name: str) -> Response:
@@ -217,7 +270,11 @@ def _add_ui_routes(router: APIRouter, prefix: str) -> None:
                 asset_name,
                 base_path=prefix,
             )
-            return Response(content=content, media_type=content_type)
+            return Response(
+                content=content,
+                media_type=content_type,
+                headers=_NO_STORE_HEADERS,
+            )
         except FileNotFoundError:
             return JSONResponse(
                 status_code=404,
@@ -227,6 +284,7 @@ def _add_ui_routes(router: APIRouter, prefix: str) -> None:
                         "message": "Requested static asset was not found.",
                     },
                 },
+                headers=_NO_STORE_HEADERS,
             )
 
 
@@ -283,7 +341,18 @@ def create_inspector_router(
         prefix=config.path_prefix,
         tags=["Tailora Inspector"],
         dependencies=_resolve_dependencies(dependencies, config.access_check),
+        route_class=_NoStoreRoute,
     )
+    _add_inspector_routes(router, store, config)
+    return router
+
+
+def _add_inspector_routes(
+    router: APIRouter,
+    store: RingBuffer,
+    config: InspectorConfig,
+) -> None:
+    """검증된 설정으로 Inspector의 모든 route를 등록한다."""
     _add_health_route(router, store)
     _add_list_route(
         router,
@@ -308,4 +377,3 @@ def create_inspector_router(
         config.api_max_limit,
     )
     _add_ui_routes(router, config.path_prefix)
-    return router

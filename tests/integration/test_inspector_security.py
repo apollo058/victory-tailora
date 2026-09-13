@@ -92,7 +92,30 @@ def test_confirmed_production_enable_emits_safe_warning(caplog):
     """이중 확인한 production 활성화가 안전한 경고를 남기는지 확인한다."""
     app = create_application()
 
+    def allow_production_request(request):
+        """production Inspector 테스트 요청을 허용한다."""
+        return True
+
     with caplog.at_level(logging.WARNING):
+        enable_inspector(
+            app,
+            enabled=True,
+            environment="production",
+            allow_in_production=True,
+            access_check=allow_production_request,
+        )
+
+    assert "production" in caplog.text
+    assert "authorization" not in caplog.text.lower()
+    assert "token" not in caplog.text.lower()
+
+
+def test_production_requires_access_check_before_registration():
+    """production Inspector가 접근 hook 없이 활성화되지 않는지 확인한다."""
+    app = create_application()
+    original_routes = list(app.router.routes)
+
+    with pytest.raises(ValueError, match="access_check"):
         enable_inspector(
             app,
             enabled=True,
@@ -100,9 +123,8 @@ def test_confirmed_production_enable_emits_safe_warning(caplog):
             allow_in_production=True,
         )
 
-    assert "production" in caplog.text
-    assert "authorization" not in caplog.text.lower()
-    assert "token" not in caplog.text.lower()
+    assert app.router.routes == original_routes
+    assert count_tailora_middleware(app) == 0
 
 
 def test_access_check_protects_all_endpoints_assets_and_plugin():
@@ -137,6 +159,22 @@ def test_access_check_protects_all_endpoints_assets_and_plugin():
 
     allowed_docs = client.get("/docs", headers=headers)
     assert "TailoraSwaggerPlugin" in allowed_docs.text
+
+
+def test_denied_inspector_response_disables_caching():
+    """접근 거부 응답도 중간 캐시에 저장되지 않는지 확인한다."""
+
+    def deny_request(request):
+        """테스트 요청을 항상 거부한다."""
+        return False
+
+    app = create_application()
+    enable_inspector(app, enabled=True, access_check=deny_request)
+
+    response = TestClient(app).get("/__tailora/health")
+
+    assert response.status_code == 403
+    assert response.headers["cache-control"] == "no-store"
 
 
 def test_async_access_check_is_supported_by_api_and_docs():

@@ -78,6 +78,22 @@
           </div>
         </div>
       </section>
+    <section class="panel aggregate-panel" aria-labelledby="aggregate-heading">
+      <div class="panel-header">
+        <div class="panel-header-left">
+          <h2 id="aggregate-heading" class="panel-title">집계 요약</h2>
+        </div>
+        <div class="panel-header-actions">
+          <span class="hint-text">현재 링버퍼 기준</span>
+        </div>
+      </div>
+      <div class="panel-body aggregate-body" id="aggregate-container" role="region" aria-live="polite" aria-label="요청 및 쿼리 집계">
+        <div class="state-container state-loading">
+          <div class="spinner" aria-hidden="true"></div>
+          <p class="state-text">집계 정보를 불러오고 있습니다...</p>
+        </div>
+      </div>
+    </section>
     </main>
   </div>
 

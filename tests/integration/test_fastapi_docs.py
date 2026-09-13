@@ -29,6 +29,7 @@ def test_enabled_inspector_adds_plugin_to_existing_docs_page():
     assert "/__tailora/swagger-plugin.js" in response.text
     assert "/__tailora/swagger-plugin.css" in response.text
     assert "swagger-ui-dist@5.17.14" in response.text
+    assert response.headers["cache-control"] == "no-store"
 
 
 def test_plugin_assets_are_served_from_the_inspector_prefix():
@@ -41,9 +42,11 @@ def test_plugin_assets_are_served_from_the_inspector_prefix():
     stylesheet_response = client.get("/__tailora/swagger-plugin.css")
 
     assert plugin_response.status_code == 200
+    assert plugin_response.headers["cache-control"] == "no-store"
     assert "application/javascript" in plugin_response.headers["content-type"]
     assert "TailoraSwaggerPlugin" in plugin_response.text
     assert stylesheet_response.status_code == 200
+    assert stylesheet_response.headers["cache-control"] == "no-store"
     assert "text/css" in stylesheet_response.headers["content-type"]
 
 

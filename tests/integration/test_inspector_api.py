@@ -84,6 +84,51 @@ def test_health_endpoint():
     assert data["capacity"] == 50
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/__tailora/health",
+        "/__tailora/requests",
+        "/__tailora/requests/missing",
+        "/__tailora/aggregates",
+    ],
+)
+def test_inspector_data_responses_disable_caching(path: str):
+    """Inspector 데이터 응답이 브라우저와 중간 캐시에 저장되지 않는지 확인한다."""
+    app, _ = create_inspector_app()
+    response = TestClient(app).get(path)
+
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_standalone_router_error_responses_disable_caching():
+    """미들웨어 없이 등록한 Inspector router 오류 응답도 캐시되지 않게 한다."""
+
+    def deny_request(request):
+        """라우터 단독 사용 테스트에서 Inspector 접근을 거부한다."""
+        return False
+
+    denied_app = FastAPI()
+    denied_app.include_router(
+        create_inspector_router(
+            RingBuffer(),
+            access_check=deny_request,
+        ),
+    )
+    denied_response = TestClient(denied_app).get("/__tailora/health")
+
+    validation_app = FastAPI()
+    validation_app.include_router(create_inspector_router(RingBuffer()))
+    validation_response = TestClient(validation_app).get(
+        "/__tailora/requests?limit=0",
+    )
+
+    assert denied_response.status_code == 403
+    assert denied_response.headers["cache-control"] == "no-store"
+    assert validation_response.status_code == 422
+    assert validation_response.headers["cache-control"] == "no-store"
+
+
 def test_requests_list_empty():
     """저장된 이벤트가 없을 때 빈 목록과 메타데이터를 반환하는지 확인한다."""
     app, _ = create_inspector_app()
@@ -123,6 +168,63 @@ def test_requests_list_ordered_and_limited():
     assert items[1]["request_id"] == "req-2"
     assert items[1]["query_count"] == 1
     assert "queries" not in items[1]
+
+
+def test_requests_list_passes_limit_to_store_snapshot():
+    """목록 API가 요청한 개수만 저장소 snapshot으로 복사하는지 확인한다."""
+
+    class TrackingStore(RingBuffer):
+        """저장소 snapshot에 전달된 limit을 기록하는 테스트 저장소."""
+
+        def __init__(self):
+            """기록용 상태와 기본 링버퍼를 초기화한다."""
+            super().__init__()
+            self.requested_limits: list[int | None] = []
+
+        def list(self, limit: int | None = None):
+            """부모 snapshot을 호출하기 전에 요청된 limit을 기록한다."""
+            self.requested_limits.append(limit)
+            return super().list(limit)
+
+    store = TrackingStore()
+    store.add(make_request("req-1"))
+    store.add(make_request("req-2"))
+    app, _ = create_inspector_app(store=store)
+
+    response = TestClient(app).get("/__tailora/requests?limit=1")
+
+    assert response.status_code == 200
+    assert store.requested_limits == [1]
+
+
+def test_aggregates_use_read_only_store_view():
+    """집계 API가 전체 이벤트 deep copy 대신 읽기 전용 뷰를 사용하는지 확인한다."""
+
+    class TrackingStore(RingBuffer):
+        """집계 API의 저장소 조회 방식을 기록하는 테스트 저장소."""
+
+        def __init__(self):
+            """조회 기록과 기본 링버퍼를 초기화한다."""
+            super().__init__()
+            self.view_limits: list[int | None] = []
+
+        def _latest_view(self, limit: int | None = None):
+            """읽기 전용 뷰 호출을 기록하고 부모 구현을 사용한다."""
+            self.view_limits.append(limit)
+            return super()._latest_view(limit)
+
+        def list(self, limit: int | None = None):
+            """집계 경로가 deep copy 목록을 사용하면 테스트를 실패시킨다."""
+            raise AssertionError("aggregate must use latest_view")
+
+    store = TrackingStore()
+    store.add(make_request("req-1"))
+    app, _ = create_inspector_app(store=store)
+
+    response = TestClient(app).get("/__tailora/aggregates")
+
+    assert response.status_code == 200
+    assert store.view_limits == [None]
 
 
 def test_requests_list_invalid_limit_returns_422():
