@@ -1,11 +1,37 @@
 """Swagger UI 안에서 Tailora Inspector 탭이 동작하는지 브라우저로 검증한다."""
 
-from playwright.sync_api import Page, Route, expect
+from playwright.sync_api import FrameLocator, Page, Route, expect
 
 
 def abort_plugin_request(route: Route) -> None:
     """플러그인 JavaScript 요청을 중단해 fallback 동작을 검증한다."""
     route.abort()
+
+
+def fail_aggregate_request(route: Route) -> None:
+    """집계 API만 실패시켜 요청 목록의 장애 격리를 검증한다."""
+    route.fulfill(
+        status=503,
+        content_type="application/json",
+        body='{"error":"aggregate unavailable"}',
+    )
+
+
+def expect_inspector_request_content(frame: FrameLocator) -> None:
+    """Inspector에 요청 목록과 집계 패널이 표시되는지 확인한다."""
+    expect(
+        frame.get_by_role("heading", name="Tailora Inspector"),
+    ).to_be_visible()
+    expect(
+        frame.get_by_role("option")
+        .filter(
+            has_text="/users/{user_id}",
+        )
+        .first,
+    ).to_be_visible()
+    expect(
+        frame.get_by_role("heading", name="집계 요약"),
+    ).to_be_visible()
 
 
 def test_docs_and_inspector_tabs_work_together(
@@ -42,22 +68,36 @@ def test_docs_and_inspector_tabs_work_together(
     inspector_frame = page.frame_locator("iframe[title='Tailora Inspector']")
 
     expect(inspector_tab).to_have_attribute("aria-selected", "true")
-    expect(
-        inspector_frame.get_by_role("heading", name="Tailora Inspector"),
-    ).to_be_visible()
-    expect(
-        inspector_frame.get_by_role("option")
-        .filter(
-            has_text="/users/{user_id}",
-        )
-        .first,
-    ).to_be_visible()
+    expect_inspector_request_content(inspector_frame)
 
     docs_tab.click()
 
     expect(docs_tab).to_have_attribute("aria-selected", "true")
     expect(user_operation.get_by_role("button", name="Execute")).to_be_visible()
     expect(user_operation.get_by_role("textbox", name="user_id")).to_have_value("1")
+
+
+def test_aggregate_failure_does_not_hide_request_list(
+    browser_page: Page,
+    live_example_url: str,
+) -> None:
+    """집계 API가 실패해도 Inspector 요청 목록은 계속 표시한다."""
+    page = browser_page
+    page.goto(f"{live_example_url}/users/1")
+    page.route("**/__tailora/aggregates", fail_aggregate_request)
+
+    page.goto(f"{live_example_url}/docs")
+    page.get_by_role("tab", name="Inspector").click()
+    inspector_frame = page.frame_locator("iframe[title='Tailora Inspector']")
+
+    expect(
+        inspector_frame.get_by_role("option")
+        .filter(has_text="/users/{user_id}")
+        .first,
+    ).to_be_visible()
+    expect(
+        inspector_frame.get_by_text("Failed to fetch aggregates: 503"),
+    ).to_be_visible()
 
 
 def test_plugin_asset_failure_keeps_api_docs_available(
@@ -75,6 +115,21 @@ def test_plugin_asset_failure_keeps_api_docs_available(
     expect(
         page.get_by_role("button", name="GET /users/{user_id} Get User"),
     ).to_be_visible()
+
+
+def test_swagger_core_asset_failure_shows_a_safe_warning(
+    browser_page: Page,
+    live_example_url: str,
+) -> None:
+    """Swagger core 자산을 불러오지 못하면 사용자 안내를 표시한다."""
+    page = browser_page
+    page.route("**/swagger-ui-bundle.js", abort_plugin_request)
+
+    page.goto(f"{live_example_url}/docs")
+
+    expect(page.get_by_role("status")).to_contain_text(
+        "API Docs를 불러오지 못했습니다",
+    )
 
 
 def test_inspector_is_loaded_only_after_its_tab_is_selected(

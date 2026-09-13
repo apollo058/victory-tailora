@@ -2,11 +2,11 @@
 
 Victory Tailora is the working codename for an open-source development inspector for Python APIs.
 
-The project aims to make request and database behavior visible while developing with FastAPI and Django Ninja. It is designed for the moment before a team needs Sentry, Grafana, Jaeger, or a full observability stack: install a package, enable one setting, open the existing Swagger UI, and inspect what happened during an API call.
+The project currently makes request and database behavior visible while developing with FastAPI and SQLAlchemy. Django Ninja remains a future adapter target. Tailora is designed for the moment before a team needs Sentry, Grafana, Jaeger, or a full observability stack: install a package, enable one setting, open the existing Swagger UI, and inspect what happened during an API call.
 
 ## Current status
 
-STEP 11이 완료되었습니다. `tailora` Python 패키지에는 프레임워크와 무관한
+STEP 12가 완료되었습니다. `tailora` Python 패키지에는 프레임워크와 무관한
 이벤트 모델, 헤더·쿼리 파라미터·SQL·fingerprint·오류 요약의 개인정보 마스킹,
 제한된 프로세스 내부 `RingBuffer`, 비동기 요청 컨텍스트를 격리하는 FastAPI
 요청 수집 미들웨어, SQLAlchemy Engine 쿼리 수집 hook, 읽기 전용 Inspector JSON
@@ -18,8 +18,8 @@ FastAPI의 기존 Swagger UI에는 Inspector 탭이 추가되며, API Docs와 Tr
 기본값은 비활성이며 `enabled=True`를 명시해야 수집기·API·Swagger
 plugin이 함께 켜집니다. production 활성화는 별도 확인을 요구하고,
 동기·비동기 접근 hook과 저장·응답 한도를 설정할 수 있습니다.
-STEP 12의 FastAPI 예제, quickstart 문서, wheel·sdist metadata와 격리된 설치
-검증, 첫 pre-release 후보(`0.1.0rc1`) 준비를 진행했습니다. 실제 PyPI 업로드는
+FastAPI 예제, quickstart 문서, wheel·sdist metadata와 격리된 설치 검증, 첫
+pre-release 후보(`0.1.0rc1`)를 준비했습니다. 실제 PyPI 업로드는
 별도 배포 승인 후 진행합니다.
 
 ## Development setup
@@ -52,7 +52,8 @@ complete copy-and-run path is in the [quickstart guide](docs/quickstart.md).
 ## Swagger UI 호환성
 
 Tailora는 Swagger UI `5.17.14`의 공식 plugin과 custom layout 확장 지점을
-지원합니다. `enable_inspector(app, enabled=True)`를 호출하면
+지원합니다. core 자산은 고정 버전과 SRI로 검증하며, CDN 연결에 실패하면 안전한
+안내를 표시합니다. `enable_inspector(app, enabled=True)`를 호출하면
 FastAPI가 만든 기본 Swagger docs route에 Inspector 탭을 추가합니다. Swagger UI
 core를 복사하거나 수정하지 않으며, custom docs URL과 `root_path`도 지원합니다.
 
@@ -115,7 +116,7 @@ The API documentation remains Swagger UI. Inspector is an additional tab supplie
 
 ## Target users
 
-- Python developers building APIs with FastAPI or Django Ninja.
+- Python developers building APIs with FastAPI and SQLAlchemy.
 - Small teams that need quick local visibility before adopting an observability platform.
 - Open-source projects that want useful development diagnostics without external services.
 - Developers investigating slow endpoints, excessive queries, or N+1 behavior.
@@ -125,7 +126,7 @@ The API documentation remains Swagger UI. Inspector is an additional tab supplie
 1. **Development first** — disabled by default outside local development.
 2. **Zero infrastructure** — no database, collector, Grafana, or hosted account required for the basic experience.
 3. **One-screen diagnosis** — connect a request to its queries without copying logs between tools.
-4. **Framework adapters** — share one event model while keeping FastAPI, Django Ninja, and database integrations separate.
+4. **Framework adapters** — share one event model while keeping FastAPI and database integrations separate; additional adapters remain on the roadmap.
 5. **Safe defaults** — redact secrets and query parameters, cap memory usage, and avoid response-body capture by default.
 6. **Optional depth** — start with request and SQL timing; add stack traces, EXPLAIN, sampling, and OpenTelemetry export later.
 
@@ -143,7 +144,7 @@ tests/
 └── integration/
 
 examples/
-├── django_ninja/            Minimal example application
+├── django_ninja/            Future adapter placeholder
 └── fastapi/                 Minimal runnable FastAPI application
 
 packages/                    Planning documents for future package boundaries
@@ -172,9 +173,9 @@ enable_inspector(app, enabled=True)
 
 Then the developer opens the host application's configured Swagger page and selects the Inspector tab. The UI is served as part of the Swagger UI integration; it is not a separate frontend application.
 
-## Planned first release
+## Current pre-release scope
 
-- FastAPI and Django Ninja adapters.
+- FastAPI adapter with SQLAlchemy integration.
 - Request method, route, status, and duration.
 - SQL statement, normalized fingerprint, duration, and count.
 - Recent-request in-memory ring buffer.

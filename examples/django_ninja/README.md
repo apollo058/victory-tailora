@@ -1,4 +1,4 @@
 # Django Ninja example
 
-Reserved for a small example application showing the Inspector integrated with Django Ninja.
-
+Reserved for a future example application. Django Ninja is not supported in the current
+pre-release; the implemented example is under `examples/fastapi`.

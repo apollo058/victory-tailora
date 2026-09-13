@@ -10,6 +10,12 @@ from tailora.adapters.fastapi.security import is_inspector_access_allowed
 from tailora.config import AccessCheck
 
 SUPPORTED_SWAGGER_UI_VERSION = "5.17.14"
+_SWAGGER_UI_CSS_INTEGRITY = (
+    "sha384-wxLW6kwyHktdDGr6Pv1zgm/VGJh99lfUbzSn6HNHBENZlCN7W602k9VkGdxuFvPn"
+)
+_SWAGGER_UI_JS_INTEGRITY = (
+    "sha384-wmyclcVGX/WhUkdkATwhaK1X1JtiNrr2EoYJ+diV3vj4v6OC5yCeSu+yW13SYJep"
+)
 _DEFAULT_DOCS_ROUTE_NAME = "swagger_ui_html"
 _TAILORA_DOCS_ROUTE_NAME = "tailora_swagger_ui_html"
 
@@ -75,7 +81,10 @@ def _create_docs_endpoint(
             root_path=root_path,
             include_inspector=include_inspector,
         )
-        return HTMLResponse(content=content)
+        return HTMLResponse(
+            content=content,
+            headers={"Cache-Control": "no-store"},
+        )
 
     return tailora_swagger_ui
 
@@ -126,12 +135,23 @@ def _render_base_docs_html(
   <meta charset=\"utf-8\">
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
   <title>API Docs</title>
-  <link rel=\"stylesheet\" href=\"{safe_css_url}\">
+  <link rel=\"stylesheet\" href=\"{safe_css_url}\"
+    integrity=\"{_SWAGGER_UI_CSS_INTEGRITY}\" crossorigin=\"anonymous\">
 </head>
 <body>
+  <div id=\"tailora-swagger-core-warning\" role=\"status\" hidden></div>
   <div id=\"swagger-ui\"></div>
-  <script src=\"{safe_js_url}\"></script>
+  <script src=\"{safe_js_url}\"
+    integrity=\"{_SWAGGER_UI_JS_INTEGRITY}\" crossorigin=\"anonymous\"></script>
   <script>
+    if (typeof SwaggerUIBundle !== \"function\") {{
+      var coreWarning = document.getElementById(\"tailora-swagger-core-warning\");
+      if (coreWarning) {{
+        coreWarning.hidden = false;
+        coreWarning.textContent =
+          \"API Docs를 불러오지 못했습니다. Swagger UI 자산 연결을 확인하세요.\";
+      }}
+    }} else {{
     window.ui = SwaggerUIBundle({{
       url: {safe_openapi_url},
       dom_id: \"#swagger-ui\",
@@ -142,6 +162,7 @@ def _render_base_docs_html(
       ],
       layout: \"BaseLayout\"
     }});
+    }}
   </script>
 </body>
 </html>"""
@@ -198,24 +219,52 @@ def _render_docs_document(
     safe_swagger_js_url: str,
 ) -> str:
     """이미 안전하게 준비한 값으로 Swagger UI HTML 문서를 조립한다."""
+    scripts = _render_docs_scripts(
+        safe_openapi_url,
+        safe_plugin_url,
+        safe_swagger_js_url,
+    )
     return f"""<!doctype html>
 <html lang=\"ko\">
 <head>
   <meta charset=\"utf-8\">
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
   <title>API Docs</title>
-  <link rel=\"stylesheet\" href=\"{safe_swagger_css_url}\">
+  <link rel=\"stylesheet\" href=\"{safe_swagger_css_url}\"
+    integrity=\"{_SWAGGER_UI_CSS_INTEGRITY}\" crossorigin=\"anonymous\">
   <link rel=\"stylesheet\" href=\"{safe_plugin_css_url}\">
 </head>
 <body>
+  <div id=\"tailora-swagger-core-warning\" role=\"status\" hidden></div>
   <div id=\"tailora-plugin-warning\" role=\"status\" hidden></div>
   <div id=\"swagger-ui\"></div>
   <script>{config_script}</script>
-  <script src=\"{safe_swagger_js_url}\"></script>
+{scripts}
+</body>
+</html>"""
+
+
+def _render_docs_scripts(
+    safe_openapi_url: str,
+    safe_plugin_url: str,
+    safe_swagger_js_url: str,
+) -> str:
+    """Swagger core·plugin 자산과 초기화 스크립트를 구성한다."""
+    return f"""  <script src=\"{safe_swagger_js_url}\"
+    integrity=\"{_SWAGGER_UI_JS_INTEGRITY}\" crossorigin=\"anonymous\"></script>
   <script src=\"{safe_plugin_url}\"
     onerror=\"window.TailoraSwaggerPluginLoadFailed = true\"></script>
   <script>
     (function () {{
+      var coreWarning = document.getElementById(\"tailora-swagger-core-warning\");
+      if (typeof SwaggerUIBundle !== \"function\") {{
+        if (coreWarning) {{
+          coreWarning.hidden = false;
+          coreWarning.textContent =
+            \"API Docs를 불러오지 못했습니다. Swagger UI 자산 연결을 확인하세요.\";
+        }}
+        return;
+      }}
       var plugin = window.TailoraSwaggerPlugin;
       var warning = document.getElementById(\"tailora-plugin-warning\");
       if (!plugin && warning) {{
@@ -235,9 +284,7 @@ def _render_docs_document(
         layout: plugin ? \"TailoraDocsLayout\" : \"BaseLayout\"
       }});
     }})();
-  </script>
-</body>
-</html>"""
+  </script>"""
 
 
 def _render_config_script(inspector_url: str) -> str:

@@ -68,16 +68,25 @@ class RingBuffer:
 
     def list(self, limit: int | None = None) -> list[RequestEvent]:
         """최신 이벤트부터 복사본 목록을 반환한다."""
-        if limit is None:
-            item_limit = self._capacity
-        else:
-            item_limit = _validate_positive_integer(limit, "limit")
-            item_limit = min(item_limit, self._capacity)
+        item_limit = self._resolve_limit(limit)
 
         with self._lock:
             events = list(self._events)
         latest_events = list(reversed(events))[:item_limit]
         return copy.deepcopy(latest_events)
+
+    def _latest_view(self, limit: int | None = None) -> tuple[RequestEvent, ...]:
+        """내부 읽기 전용 분석에 사용할 최신 이벤트 참조를 반환한다."""
+        item_limit = self._resolve_limit(limit)
+        with self._lock:
+            return tuple(reversed(self._events))[:item_limit]
+
+    def _resolve_limit(self, limit: int | None) -> int:
+        """조회 limit을 저장소 용량 안의 정수로 정규화한다."""
+        if limit is None:
+            return self._capacity
+        item_limit = _validate_positive_integer(limit, "limit")
+        return min(item_limit, self._capacity)
 
     def get(self, request_id: str) -> RequestEvent | None:
         """요청 ID에 맞는 이벤트 복사본을 반환하고 없으면 None을 반환한다."""

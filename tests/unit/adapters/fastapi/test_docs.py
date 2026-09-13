@@ -51,3 +51,23 @@ def test_rendered_docs_records_the_supported_swagger_ui_version():
     )
 
     assert f"swagger-ui-dist@{SUPPORTED_SWAGGER_UI_VERSION}" in content
+
+
+def test_rendered_docs_pins_swagger_assets_with_sri_and_core_fallback():
+    """Swagger 자산 무결성과 core 로딩 실패 안내가 HTML에 포함되는지 확인한다."""
+    content = render_tailora_swagger_ui_html(
+        openapi_url="/openapi.json",
+        inspector_prefix="/__tailora",
+    )
+
+    assert (
+        'integrity="sha384-wxLW6kwyHktdDGr6Pv1zgm/VGJh99lfUbzSn6HNHBENZlCN7W602k9VkGdxuFvPn"'
+        in content
+    )
+    assert (
+        'integrity="sha384-wmyclcVGX/WhUkdkATwhaK1X1JtiNrr2EoYJ+diV3vj4v6OC5yCeSu+yW13SYJep"'
+        in content
+    )
+    assert 'crossorigin="anonymous"' in content
+    assert 'id="tailora-swagger-core-warning"' in content
+    assert "typeof SwaggerUIBundle" in content

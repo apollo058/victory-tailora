@@ -26,5 +26,7 @@
 - Inspector 저장소는 프로세스 내부 메모리 링버퍼이며 장기 telemetry 저장소가
   아닙니다.
 - 공식 quickstart는 FastAPI와 SQLAlchemy 조합만 다룹니다.
+- 현재 공식 프레임워크 지원은 FastAPI이며 Django Ninja 어댑터는 아직 제공하지
+  않습니다.
 - Inspector를 production 인증·방화벽의 대체 수단으로 사용하면 안 됩니다.
 - PyPI 업로드와 GitHub release 생성은 별도 배포 승인 후 진행합니다.

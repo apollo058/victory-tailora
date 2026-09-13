@@ -128,6 +128,10 @@ class InspectorConfig:
                 "allow_in_production must be True to enable Inspector "
                 "in production",
             )
+        if self.enabled and self.is_production and self.access_check is None:
+            raise ValueError(
+                "access_check must be provided to enable Inspector in production",
+            )
 
     @property
     def is_production(self) -> bool:

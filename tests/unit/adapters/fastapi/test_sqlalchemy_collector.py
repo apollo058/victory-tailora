@@ -80,6 +80,26 @@ def test_duplicate_registration_prevented(engine):
         reset_current_context(token)
 
 
+def test_engine_registry_does_not_retain_destroyed_engines():
+    """등록이 끝난 Engine 객체를 전역 registry가 계속 보관하지 않는지 확인한다."""
+    import gc
+    import weakref
+
+    temporary_engine = create_engine("sqlite://")
+    register_sqlalchemy_inspector(temporary_engine)
+    engine_reference = weakref.ref(temporary_engine)
+    engine_id = id(temporary_engine)
+
+    del temporary_engine
+    gc.collect()
+
+    assert engine_reference() is None
+    assert all(
+        id(engine) != engine_id
+        for engine in sqlalchemy_adapter._REGISTERED_ENGINES
+    )
+
+
 def test_concurrent_engine_registration_is_idempotent(engine, monkeypatch):
     """동시에 같은 엔진을 등록해도 listener가 한 번만 추가되는지 확인한다."""
     original_listen = sqlalchemy_adapter.event.listen

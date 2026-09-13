@@ -20,6 +20,7 @@
     btnRefresh: document.getElementById('btn-refresh'),
     requestCountBadge: document.getElementById('request-count-badge'),
     listContainer: document.getElementById('list-container'),
+    aggregateContainer: document.getElementById('aggregate-container'),
     detailContainer: document.getElementById('detail-container'),
     detailActions: document.getElementById('detail-actions'),
   };
@@ -49,6 +50,14 @@
       const resp = await fetch(`${BASE_PATH}/requests`, { cache: 'no-store' });
       if (!resp.ok) {
         throw new Error(`Failed to fetch requests: ${resp.status}`);
+      }
+      return await resp.json();
+    },
+
+    async fetchAggregates() {
+      const resp = await fetch(`${BASE_PATH}/aggregates`, { cache: 'no-store' });
+      if (!resp.ok) {
+        throw new Error(`Failed to fetch aggregates: ${resp.status}`);
       }
       return await resp.json();
     },
@@ -139,6 +148,60 @@
       if (btnRetry) {
         btnRetry.addEventListener('click', () => controller.loadData());
       }
+    },
+
+    renderAggregateLoading() {
+      if (!elements.aggregateContainer) return;
+      elements.aggregateContainer.innerHTML = `
+        <div class="state-container state-loading">
+          <div class="spinner" aria-hidden="true"></div>
+          <p class="state-text">집계 정보를 불러오고 있습니다...</p>
+        </div>
+      `;
+    },
+
+    renderAggregateError(msg) {
+      if (!elements.aggregateContainer) return;
+      elements.aggregateContainer.innerHTML = `
+        <div class="state-container state-error">
+          <p class="placeholder-desc">${escapeHtml(msg || '집계 정보를 불러올 수 없습니다.')}</p>
+        </div>
+      `;
+    },
+
+    renderAggregates(data) {
+      if (!elements.aggregateContainer) return;
+      const routes = Array.isArray(data && data.routes) ? data.routes : [];
+      const fingerprints = Array.isArray(data && data.fingerprints)
+        ? data.fingerprints
+        : [];
+      const scope = data && data.analysis_scope ? data.analysis_scope : {};
+
+      if (routes.length === 0 && fingerprints.length === 0) {
+        elements.aggregateContainer.innerHTML = `
+          <div class="state-container state-empty">
+            <p class="state-text">집계할 요청과 쿼리가 아직 없습니다.</p>
+          </div>
+        `;
+        return;
+      }
+
+      elements.aggregateContainer.innerHTML = `
+        <div class="aggregate-grid">
+          ${renderAggregateTable(
+            `Endpoint · ${formatInteger(scope.request_count)} requests`,
+            'Endpoint 집계',
+            ['Route', 'Count', 'Avg', 'SQL'],
+            renderRouteRows(routes),
+          )}
+          ${renderAggregateTable(
+            'SQL Fingerprint',
+            'SQL fingerprint 집계',
+            ['Fingerprint', 'Count', 'Requests', 'Avg'],
+            renderFingerprintRows(fingerprints),
+          )}
+        </div>
+      `;
     },
 
     renderList(items, selectedId) {
@@ -522,6 +585,7 @@
 
       state.status = 'loading';
       renderer.renderListLoading();
+      renderer.renderAggregateLoading();
 
       try {
         // 1. Health 체크
@@ -533,6 +597,7 @@
           state.status = 'disabled';
           renderer.updateStatusPill('disabled', 'Inspector Inactive');
           renderer.renderListDisabled('Inspector API 서비스에 연결할 수 없거나 비활성화되었습니다.');
+          renderer.renderAggregateError('Inspector 집계 API에 연결할 수 없습니다.');
           renderer.renderDetailPlaceholder('Inspector가 비활성화되어 상세 정보를 조회할 수 없습니다.', '비활성 상태');
           return;
         }
@@ -549,10 +614,23 @@
         renderer.updateStatusPill('ok', `Active (${health.stored_requests}/${health.capacity})`);
 
         // 2. 최근 요청 목록 조회
-        const data = await api.fetchRequests();
+        const [requestResult, aggregateResult] = await Promise.allSettled([
+          api.fetchRequests(),
+          api.fetchAggregates(),
+        ]);
         if (currentToken !== state.token) return;
 
+        if (requestResult.status === 'rejected') {
+          throw requestResult.reason;
+        }
+
+        const data = requestResult.value;
         state.requests = data.items || [];
+        if (aggregateResult.status === 'fulfilled') {
+          renderer.renderAggregates(aggregateResult.value);
+        } else {
+          renderer.renderAggregateError(aggregateResult.reason.message);
+        }
         renderer.updateLastRefreshed();
 
         if (state.requests.length === 0) {
@@ -582,6 +660,7 @@
         state.errorMessage = err.message;
         renderer.updateStatusPill('err', 'Disconnected');
         renderer.renderListError(err.message);
+        renderer.renderAggregateError(err.message);
       }
     },
 
@@ -635,6 +714,60 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  function renderAggregateTable(title, ariaLabel, headers, rows) {
+    const headerHtml = headers
+      .map((header) => `<th>${escapeHtml(header)}</th>`)
+      .join('');
+    const bodyHtml = rows || `<tr><td colspan="${headers.length}">데이터 없음</td></tr>`;
+    return `
+      <div class="aggregate-section">
+        <h3 class="aggregate-section-title">${escapeHtml(title)}</h3>
+        <table class="aggregate-table" aria-label="${escapeHtml(ariaLabel)}">
+          <thead><tr>${headerHtml}</tr></thead>
+          <tbody>${bodyHtml}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderRouteRows(routes) {
+    return routes.map((route) => {
+      const template = route.route_template || '/';
+      return `
+        <tr>
+          <td title="${escapeHtml(template)}">${escapeHtml(template)}</td>
+          <td>${formatInteger(route.count)}</td>
+          <td>${formatMilliseconds(route.avg_duration_ms)}</td>
+          <td>${formatInteger(route.total_queries)}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function renderFingerprintRows(fingerprints) {
+    return fingerprints.map((item) => {
+      const fingerprint = item.fingerprint || '[없음]';
+      return `
+        <tr>
+          <td title="${escapeHtml(fingerprint)}">${escapeHtml(fingerprint)}</td>
+          <td>${formatInteger(item.count)}</td>
+          <td>${formatInteger(item.request_count)}</td>
+          <td>${formatMilliseconds(item.avg_duration_ms)}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function formatInteger(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? String(Math.max(0, Math.round(number))) : '0';
+  }
+
+  function formatMilliseconds(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? `${Math.max(0, number).toFixed(1)}ms` : '0.0ms';
   }
 
   function isInputFocused(e) {

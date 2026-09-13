@@ -29,22 +29,28 @@ enable_inspector(
 )
 ```
 
-`allow_in_production`은 인증 기능이 아닙니다. 외부 네트워크에 열려 있는 서버에서는
-`access_check`, 사내망·VPN, 방화벽 정책을 함께 적용하십시오. 환경 이름은 실수를
-줄이는 보조 설정이며 네트워크 보안 경계가 아닙니다.
+`allow_in_production`은 인증 기능이 아닙니다. production에서 Inspector를 켜려면
+`access_check`도 반드시 제공해야 하며, 외부 네트워크에 열려 있는 서버에서는
+사내망·VPN·방화벽 정책도 함께 적용하십시오. 환경 이름은 실수를 줄이는 보조
+설정이며 네트워크 보안 경계가 아닙니다.
 
 ## 수집하지 않는 데이터
 
 Tailora는 요청 본문, 응답 본문, SQLAlchemy parameters, 인증 헤더와 쿠키의
 원문을 이벤트로 저장하지 않습니다. SQL literal과 오류 요약은 저장 전에 마스킹되고
-API 응답 직전에 다시 마스킹됩니다. 설정·인증·수집 실패 로그에는 SQL,
-token, 요청 값, 예외 원문을 남기지 않습니다.
+API 응답 직전에 다시 마스킹됩니다. 라우트가 없는 요청은 실제 경로를 저장하지 않으며,
+Inspector 데이터 응답에는 `Cache-Control: no-store`가 적용됩니다. 설정·인증·수집
+실패 로그에는 SQL, token, 요청 값, 예외 원문을 남기지 않습니다.
 
 ## 경로와 origin
 
 Inspector UI와 API는 호스트 앱과 같은 origin의 `path_prefix` 아래에서 제공됩니다.
 Tailora는 CORS를 자동으로 넓히지 않습니다. 외부 origin 접근이 필요하면 호스트
 앱에서 허용 origin을 구체적으로 제한하고 인증 hook을 함께 적용하십시오.
+
+Swagger UI core 자산은 고정 버전 CDN URL과 SRI 무결성 검사를 사용합니다. CDN이
+차단되거나 자산 검증에 실패하면 API Docs 대신 안전한 안내를 표시합니다. 완전한
+오프라인 Swagger 자산 번들링은 현재 지원 범위에 포함되지 않습니다.
 
 ## 자원 한도
 
@@ -57,7 +63,8 @@ API 목록·집계 결과 수에 상한이 있습니다. 쿼리가 잘리면 API
 `examples/fastapi`는 로컬에서만 실행하는 가짜 데이터 예제이며 인증이나 네트워크
 보호를 제공하지 않습니다. PyPI에는 `tailora` 라이브러리와 Inspector UI asset만
 배포하고 예제·테스트·로컬 데이터베이스 파일은 배포하지 않습니다. 지원 범위는
-Python 3.10 이상, FastAPI 0.115 이상 1 미만, SQLAlchemy 2 이상 3 미만입니다.
+Python 3.10 이상, FastAPI 0.115 이상 1 미만, SQLAlchemy 2 이상 3 미만이며,
+현재 공식 프레임워크 지원은 FastAPI입니다.
 
 pre-release 후보를 실제 환경에 설치하기 전에는 clean environment에서 wheel과
 source distribution을 검사하십시오. 취약점이나 민감정보 노출을 발견하면 공개
