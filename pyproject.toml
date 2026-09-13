@@ -4,13 +4,30 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tailora"
-version = "0.1.0.dev0"
+version = "0.1.0rc1"
 description = "A development inspector for Python APIs"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "Victory" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Debuggers",
+]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/apollo058/victory-tailora"
+Repository = "https://github.com/apollo058/victory-tailora"
+Issues = "https://github.com/apollo058/victory-tailora/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -19,6 +36,7 @@ dev = [
     "pytest-playwright>=0.7,<1",
     "ruff>=0.8,<1",
     "sqlalchemy>=2.0,<3",
+    "tomli>=2,<3; python_version < '3.11'",
 ]
 fastapi = [
     "fastapi>=0.115,<1",
@@ -27,6 +45,10 @@ fastapi = [
 ]
 sqlalchemy = [
     "sqlalchemy>=2.0,<3",
+]
+release = [
+    "build==1.2.2.post1",
+    "twine==6.1.0",
 ]
 
 [tool.setuptools.packages.find]

@@ -99,7 +99,12 @@ def test_inspector_is_loaded_only_after_its_tab_is_selected(
         f"{live_example_url}/__tailora/swagger-plugin.js",
     ]
 
-    page.get_by_role("tab", name="Inspector").click()
+    with page.expect_response(
+        lambda response: response.url
+        == f"{live_example_url}/__tailora/requests"
+        and response.ok,
+    ):
+        page.get_by_role("tab", name="Inspector").click()
 
     expect(
         page.frame_locator("iframe[title='Tailora Inspector']").get_by_role(

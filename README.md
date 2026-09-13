@@ -18,7 +18,9 @@ FastAPI의 기존 Swagger UI에는 Inspector 탭이 추가되며, API Docs와 Tr
 기본값은 비활성이며 `enabled=True`를 명시해야 수집기·API·Swagger
 plugin이 함께 켜집니다. production 활성화는 별도 확인을 요구하고,
 동기·비동기 접근 hook과 저장·응답 한도를 설정할 수 있습니다.
-STEP 12의 PyPI release와 clean environment 검증은 아직 진행하지 않았습니다.
+STEP 12의 FastAPI 예제, quickstart 문서, wheel·sdist metadata와 격리된 설치
+검증, 첫 pre-release 후보(`0.1.0rc1`) 준비를 진행했습니다. 실제 PyPI 업로드는
+별도 배포 승인 후 진행합니다.
 
 ## Development setup
 
@@ -37,13 +39,15 @@ python -m pytest
 ruff check .
 ```
 
-Run the minimal FastAPI example:
+Run the FastAPI example:
 
 ```bash
 python -m uvicorn examples.fastapi.app:app --reload
 ```
 
-Then open `http://127.0.0.1:8000/health`. The response should be `{"status":"ok"}`.
+Then open `http://127.0.0.1:8000/docs`. Use `Try it out` on the example endpoints,
+select the Inspector tab, and review the request, SQL, and signal details. The
+complete copy-and-run path is in the [quickstart guide](docs/quickstart.md).
 
 ## Swagger UI 호환성
 
@@ -151,12 +155,13 @@ docs/
 
 ```
 
-## Planned product installation experience
+## Product installation experience
 
-The exact package name is intentionally still open. The intended experience is approximately:
+The package name is `tailora`. Install the FastAPI integration in an application
+environment with:
 
 ```bash
-pip install <package-name>
+pip install "tailora[fastapi]"
 ```
 
 ```python
@@ -192,3 +197,6 @@ Then the developer opens the host application's configured Swagger page and sele
 - [Product idea and open questions](docs/idea.md)
 - [Architecture proposal](docs/architecture.md)
 - [Roadmap](docs/roadmap.md)
+- [Quickstart and release checks](docs/quickstart.md)
+- [Security guide](docs/security.md)
+- [Change log](CHANGELOG.md)
