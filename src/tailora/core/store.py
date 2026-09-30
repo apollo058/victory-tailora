@@ -68,18 +68,14 @@ class RingBuffer:
 
     def list(self, limit: int | None = None) -> list[RequestEvent]:
         """최신 이벤트부터 복사본 목록을 반환한다."""
-        item_limit = self._resolve_limit(limit)
+        return list(self.latest_view(limit))
 
+    def latest_view(self, limit: int | None = None) -> tuple[RequestEvent, ...]:
+        """최신 이벤트를 내부 자료와 분리한 tuple 스냅샷으로 반환한다."""
+        item_limit = self._resolve_limit(limit)
         with self._lock:
-            events = list(self._events)
-        latest_events = list(reversed(events))[:item_limit]
+            latest_events = tuple(reversed(self._events))[:item_limit]
         return copy.deepcopy(latest_events)
-
-    def _latest_view(self, limit: int | None = None) -> tuple[RequestEvent, ...]:
-        """내부 읽기 전용 분석에 사용할 최신 이벤트 참조를 반환한다."""
-        item_limit = self._resolve_limit(limit)
-        with self._lock:
-            return tuple(reversed(self._events))[:item_limit]
 
     def _resolve_limit(self, limit: int | None) -> int:
         """조회 limit을 저장소 용량 안의 정수로 정규화한다."""

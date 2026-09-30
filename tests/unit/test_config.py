@@ -51,6 +51,22 @@ def test_config_normalizes_environment_and_path_prefix():
 
     assert config.environment == "staging"
     assert config.path_prefix == "/diagnostics"
+    assert config.requires_access_control is True
+
+
+@pytest.mark.parametrize("environment", ["development", "dev", "local"])
+def test_local_environment_does_not_require_authentication(environment):
+    """로컬 개발 환경은 기본 사용 흐름을 유지하도록 분류한다."""
+    config = InspectorConfig(environment=environment)
+
+    assert config.requires_access_control is False
+
+
+def test_test_environment_is_treated_as_shared():
+    """test 환경 이름만으로 인증 없는 공유 노출을 허용하지 않는다."""
+    config = InspectorConfig(environment="test")
+
+    assert config.requires_access_control is True
 
 
 @pytest.mark.parametrize(

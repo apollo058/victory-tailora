@@ -131,6 +131,7 @@ def test_sqlite_queries_captured_in_request_event():
         query = event.queries[0]
         assert query.sequence == 1
         assert query.database == "sqlite"
+        assert query.dialect == "sqlite"
         assert query.statement == "SELECT name, role FROM users WHERE id = ?"
         assert query.fingerprint == "select name, role from users where id = ?"
         assert query.error is None
@@ -179,7 +180,7 @@ def test_database_error_creates_failed_query_and_500_response():
 
         failed_query = event.queries[0]
         assert failed_query.error is not None
-        assert "no such column" in (failed_query.error.message or "").lower()
+        assert failed_query.error.message is None
     finally:
         unregister_sqlalchemy_inspector(engine)
         engine.dispose()

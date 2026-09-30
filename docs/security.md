@@ -6,10 +6,12 @@ Tailora Inspector는 개발 중인 앱의 요청 경로, 오류 요약, SQL 형�
 
 ## 접근 제어
 
-로컬이 아닌 공유 환경에서는 `access_check`를 반드시 설정하십시오. hook은 FastAPI
-`Request`를 받고 bool을 반환하는 동기 또는 비동기 함수입니다. `False`, hook 예외,
-bool이 아닌 반환값은 모두 접근 거부로 처리됩니다. hook이 발생시킨 401과 403의
-상태 코드는 유지되지만 응답 문구는 안전한 공통 문구로 바뀌니다.
+`development`, `dev`, `local`만 로컬 환경으로 분류합니다. `test`를 포함한 나머지
+환경에서는 `access_check` 또는 인증 dependency를 반드시 설정하십시오.
+hook은 FastAPI `Request`를 받고 bool을 반환하는 동기 또는 비동기 함수입니다.
+`False`, hook 예외, bool이 아닌 반환값은 모두 접근 거부로 처리됩니다. hook이
+발생시킨 401과 403의 상태 코드는 유지되지만 응답 문구는 안전한 공통 문구로
+바뀝니다.
 
 Inspector API, health, UI, 정적 자산은 모두 같은 접근 정책을 사용합니다. Swagger
 문서 요청이 거부되면 기본 API Docs는 유지하고 Inspector plugin만 노출하지
@@ -17,7 +19,8 @@ Inspector API, health, UI, 정적 자산은 모두 같은 접근 정책을 사�
 
 ## production 보호
 
-production에서는 다음 두 설정을 모두 지정해야 활성화됩니다.
+production에서는 Inspector 활성화와 별도 확인이 필요하며, 접근 제어도
+설정해야 합니다.
 
 ```python
 enable_inspector(
@@ -30,15 +33,16 @@ enable_inspector(
 ```
 
 `allow_in_production`은 인증 기능이 아닙니다. production에서 Inspector를 켜려면
-`access_check`도 반드시 제공해야 하며, 외부 네트워크에 열려 있는 서버에서는
-사내망·VPN·방화벽 정책도 함께 적용하십시오. 환경 이름은 실수를 줄이는 보조
-설정이며 네트워크 보안 경계가 아닙니다.
+`access_check` 또는 인증 dependency를 반드시 제공해야 하며, 외부 네트워크에
+열려 있는 서버에서는 사내망·VPN·방화벽 정책도 함께 적용하십시오. 환경 이름은
+실수를 줄이는 보조 설정이며 네트워크 보안 경계가 아닙니다.
 
 ## 수집하지 않는 데이터
 
 Tailora는 요청 본문, 응답 본문, SQLAlchemy parameters, 인증 헤더와 쿠키의
-원문을 이벤트로 저장하지 않습니다. SQL literal과 오류 요약은 저장 전에 마스킹되고
-API 응답 직전에 다시 마스킹됩니다. 라우트가 없는 요청은 실제 경로를 저장하지 않으며,
+원문을 이벤트로 저장하지 않습니다. SQL literal은 저장 전에 마스킹되고 API 응답
+직전에 다시 마스킹됩니다. 오류 문구와 stack hint는 아예 보관하지 않고 오류 종류만
+남깁니다. 라우트가 없는 요청은 실제 경로를 저장하지 않으며,
 Inspector 데이터 응답에는 `Cache-Control: no-store`가 적용됩니다. 설정·인증·수집
 실패 로그에는 SQL, token, 요청 값, 예외 원문을 남기지 않습니다.
 
@@ -54,7 +58,7 @@ Swagger UI core 자산은 고정 버전 CDN URL과 SRI 무결성 검사를 사�
 
 ## 자원 한도
 
-Ring Buffer 용량, 요청당 쿼리 수, SQL·오류·경로·헤더·파라미터 길이,
+Ring Buffer 용량, 요청당 쿼리 수, SQL·경로·헤더·파라미터 길이,
 API 목록·집계 결과 수에 상한이 있습니다. 쿼리가 잘리면 API는 전체 실행 수,
 분석한 쿼리 수, `is_queries_truncated`를 함께 반환합니다.
 

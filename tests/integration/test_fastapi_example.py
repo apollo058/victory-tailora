@@ -155,7 +155,7 @@ def test_database_error_preserves_500_response_and_failed_query():
     assert event.status_code == 500
     assert event.query_count == 1
     assert event.queries[0].error is not None
-    assert "no such column" in (event.queries[0].error.message or "").lower()
+    assert event.queries[0].error.message is None
 
 
 @pytest.mark.parametrize("path", ["/docs", "/openapi.json", "/__tailora/health"])

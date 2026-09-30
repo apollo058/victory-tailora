@@ -1,7 +1,12 @@
 """쿼리 파라미터 redaction 동작을 확인한다."""
 
 from tailora.core.policies import RedactionPolicy
-from tailora.core.privacy import REDACTED, redact_query_params
+from tailora.core.privacy import (
+    REDACTED,
+    make_sql_fingerprint,
+    redact_query_params,
+    redact_sql_statement,
+)
 
 
 def test_all_query_param_values_are_redacted():
@@ -104,3 +109,36 @@ def test_colliding_query_parameter_keys_remain_unique_and_bounded():
 
     assert len(result) == 2
     assert all(len(key) <= 64 for key in result)
+
+
+def test_mysql_hash_comment_does_not_leak_its_contents():
+    """MySQL # 주석 안의 민감한 값을 SQL 결과에서 제거한다."""
+    statement = "SELECT id FROM users # api_key=super-secret-value"
+
+    safe_statement = redact_sql_statement(statement, dialect="mysql")
+    fingerprint = make_sql_fingerprint(statement, dialect="mysql")
+
+    assert "super-secret-value" not in (safe_statement or "")
+    assert "super-secret-value" not in (fingerprint or "")
+
+
+def test_hash_inside_sql_string_is_not_treated_as_a_comment():
+    """따옴표 안의 # 기호는 주석 시작으로 처리하지 않는다."""
+    result = redact_sql_statement(
+        "SELECT '# keep this value' AS marker",
+        dialect="mysql",
+    )
+
+    assert result == "SELECT ? AS marker"
+
+
+def test_postgresql_hash_operator_is_preserved_with_dialect():
+    """PostgreSQL #>> JSON 연산자를 주석으로 오해하지 않는다."""
+    statement = "SELECT payload #>> '{name}' FROM records"
+
+    result = redact_sql_statement(statement, dialect="postgresql")
+
+    assert result is not None
+    assert "#>>" in result
+    assert "records" in result
+    assert "{name}" not in result

@@ -12,6 +12,7 @@ AccessCheck = Callable[[Any], bool | Awaitable[bool]]
 
 MAX_API_LIMIT = 1_000
 _PRODUCTION_ENVIRONMENTS = frozenset({"prod", "production"})
+_LOCAL_ENVIRONMENTS = frozenset({"development", "dev", "local"})
 _ENVIRONMENT_PATTERN = re.compile(r"^[a-z0-9_-]{1,32}$")
 _PATH_SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9._~-]+$")
 
@@ -128,10 +129,6 @@ class InspectorConfig:
                 "allow_in_production must be True to enable Inspector "
                 "in production",
             )
-        if self.enabled and self.is_production and self.access_check is None:
-            raise ValueError(
-                "access_check must be provided to enable Inspector in production",
-            )
 
     @property
     def is_production(self) -> bool:
@@ -140,6 +137,11 @@ class InspectorConfig:
             self.environment.startswith("prod-")
             or self.environment.startswith("production-")
         )
+
+    @property
+    def requires_access_control(self) -> bool:
+        """비로컬 환경에서 Inspector 접근 제어가 필요한지 반환한다."""
+        return self.environment not in _LOCAL_ENVIRONMENTS
 
     def _validate_limits(self) -> None:
         """저장소와 API 결과 수 한도의 범위와 관계를 검증한다."""

@@ -16,8 +16,8 @@ Inspector는 예제 코드의 `enabled=True`로 명시적으로 활성화됩니�
 - `GET /users/repeat/1`은 동일 fingerprint의 반복 쿼리를 만듭니다.
 - `GET /slow`와 `GET /slow-query`는 각각 느린 요청과 느린 쿼리 signal을 만듭니다.
 - `GET /secret-query`는 SQL literal이 redaction되는 모습을 보여줍니다.
-- `GET /secret-error?token=demo-secret`와 `GET /db-error`는 안전한 오류 요약을
-  확인하는 시나리오입니다.
+- `GET /secret-error?token=demo-secret`와 `GET /db-error`는 오류 종류만 남기고
+  원문은 저장하지 않는 동작을 확인하는 시나리오입니다.
 
 이 예제는 로컬 실행을 전제로 하며 `access_check`을 설정하지 않습니다. 공유
 환경이나 production에서는 보안 가이드의 접근 제어를 먼저 적용하십시오.

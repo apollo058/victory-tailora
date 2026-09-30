@@ -32,10 +32,14 @@ The Inspector should show recent requests, request timing, query count, total da
 1. Which API operation was executed?
 2. How long did the request take?
 3. How many database queries were executed?
-4. What percentage of request time was spent in the database?
+4. What percentage of request time was spent in the database? (현재 버전에서는 미제공.)
 5. Which query was slowest?
 6. Which normalized query occurred most often?
 7. Are there repeated queries that suggest N+1 behavior?
+
+현재 버전에서는 이 지표를 제공하지 않습니다. 요청 처리 시간과 DB 총 시간을 따로
+보여드립니다. 비동기 쿼리 시간이 겹칠 때 계산하는 기준을 정한 뒤 추후 다시
+검토하겠습니다.
 
 ## Open questions
 
@@ -46,4 +50,3 @@ The Inspector should show recent requests, request timing, query count, total da
 - Should the event buffer be process-local only, or optionally shared across workers?
 - Should the initial package name be `openapi-dev-inspector`, `api-dev-inspector`, or another name?
 - Should the project provide one package with optional extras or separate adapter packages?
-

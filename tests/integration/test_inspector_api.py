@@ -8,9 +8,9 @@ from fastapi.testclient import TestClient
 import pytest
 
 from tailora.adapters.fastapi import enable_inspector
-from tailora.adapters.fastapi.api import create_inspector_router
-from tailora.core.events import QueryEvent, RequestEvent
-from tailora.core.policies import RedactionPolicy
+from tailora.adapters.fastapi.api import _summarize_request, create_inspector_router
+from tailora.core.events import ErrorSummary, QueryEvent, RequestEvent
+from tailora.core.policies import RedactionPolicy, ThresholdPolicy
 from tailora.core.store import RingBuffer
 
 EVENT_TIME = datetime(2026, 8, 22, 12, 0, 0, tzinfo=timezone.utc)
@@ -118,7 +118,12 @@ def test_standalone_router_error_responses_disable_caching():
     denied_response = TestClient(denied_app).get("/__tailora/health")
 
     validation_app = FastAPI()
-    validation_app.include_router(create_inspector_router(RingBuffer()))
+    validation_app.include_router(
+        create_inspector_router(
+            RingBuffer(),
+            allow_unauthenticated=True,
+        ),
+    )
     validation_response = TestClient(validation_app).get(
         "/__tailora/requests?limit=0",
     )
@@ -197,8 +202,8 @@ def test_requests_list_passes_limit_to_store_snapshot():
     assert store.requested_limits == [1]
 
 
-def test_aggregates_use_read_only_store_view():
-    """집계 API가 전체 이벤트 deep copy 대신 읽기 전용 뷰를 사용하는지 확인한다."""
+def test_aggregates_use_public_store_snapshot():
+    """집계 API가 저장소의 공개 스냅샷 메서드를 사용하는지 확인한다."""
 
     class TrackingStore(RingBuffer):
         """집계 API의 저장소 조회 방식을 기록하는 테스트 저장소."""
@@ -208,10 +213,10 @@ def test_aggregates_use_read_only_store_view():
             super().__init__()
             self.view_limits: list[int | None] = []
 
-        def _latest_view(self, limit: int | None = None):
-            """읽기 전용 뷰 호출을 기록하고 부모 구현을 사용한다."""
+        def latest_view(self, limit: int | None = None):
+            """공개 스냅샷 호출을 기록하고 부모 구현을 사용한다."""
             self.view_limits.append(limit)
-            return super()._latest_view(limit)
+            return super().latest_view(limit)
 
         def list(self, limit: int | None = None):
             """집계 경로가 deep copy 목록을 사용하면 테스트를 실패시킨다."""
@@ -397,6 +402,47 @@ def test_api_layer_enforces_redaction_defense_in_depth():
     assert data["queries"][0]["statement"] == "SELECT * FROM users WHERE password = ?"
 
 
+def test_api_layer_drops_injected_error_messages_and_stack_hints():
+    """저장소에 직접 넣은 오류 원문도 API 응답 직전에 제거한다."""
+    store = RingBuffer()
+    event = make_request("req-error-secret")
+    event.error = ErrorSummary(
+        type="IntegrityError",
+        message="Duplicate customer-48291@example.com",
+        stack_hint="/srv/app/handlers.py:42",
+    )
+    store.add(event)
+    app, _ = create_inspector_app(store=store)
+
+    response = TestClient(app).get("/__tailora/requests/req-error-secret")
+
+    assert response.status_code == 200
+    error = response.json()["error"]
+    assert error == {
+        "type": "IntegrityError",
+        "message": None,
+        "stack_hint": None,
+    }
+
+
+def test_list_serialization_drops_unredacted_error_text():
+    """목록 직렬화 단계에서도 오류 원문과 경로 힌트를 제거한다."""
+    event = make_request("req-list-error-secret")
+    event.error = ErrorSummary(
+        type="RuntimeError",
+        message="customer-48291@example.com",
+        stack_hint="/srv/app/handlers.py:42",
+    )
+
+    result = _summarize_request(event, ThresholdPolicy())
+
+    assert result["error"] == {
+        "type": "RuntimeError",
+        "message": None,
+        "stack_hint": None,
+    }
+
+
 def test_inspector_api_with_authentication_dependency():
     """인증 dependency를 주입하여 비인가 접근을 차단할 수 있는지 확인한다."""
 
@@ -474,3 +520,9 @@ def test_create_inspector_router_requires_ring_buffer() -> None:
     """공개 라우터 생성 함수가 잘못된 저장소 자료형을 즉시 거부한다."""
     with pytest.raises(TypeError, match="store"):
         create_inspector_router(object())
+
+
+def test_standalone_router_requires_explicit_access_control():
+    """직접 만든 Router가 인증 설정 없이 공개되지 않도록 막는다."""
+    with pytest.raises(ValueError, match="access control"):
+        create_inspector_router(RingBuffer())

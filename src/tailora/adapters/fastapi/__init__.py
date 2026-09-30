@@ -205,6 +205,7 @@ def _register_components(
         threshold_policy=config.threshold_policy,
         dependencies=dependencies,
         access_check=config.access_check,
+        allow_unauthenticated=not config.requires_access_control,
         default_limit=config.api_default_limit,
         max_limit=config.api_max_limit,
     )
@@ -232,22 +233,28 @@ def _record_registration(
     setattr(app.state, _STATE_REGISTRATION_KEY, state)
 
 
-def _log_enabled_config(config: InspectorConfig) -> None:
+def _log_enabled_config(
+    config: InspectorConfig,
+    has_auth_dependency: bool,
+) -> None:
     """민감한 값 없이 Inspector 활성화 범위와 경고를 기록한다."""
+    has_access_control = config.access_check is not None or has_auth_dependency
     logger.info(
-        "Tailora Inspector enabled environment=%s path=%s capacity=%d access_check=%s",
+        "Tailora Inspector enabled environment=%s path=%s capacity=%d "
+        "access_control=%s",
         config.environment,
         config.path_prefix,
         config.store_capacity,
-        config.access_check is not None,
+        has_access_control,
     )
     if config.is_production:
         logger.warning(
             "Tailora Inspector is enabled in production; restrict network access",
         )
-    if config.access_check is None:
+    if not has_access_control:
         logger.warning(
-            "Tailora Inspector has no access check; bind the app to a trusted network",
+            "Tailora Inspector has no access control; "
+            "bind the app to a trusted network",
         )
 
 
@@ -305,8 +312,25 @@ def _enable_with_config(
         _restore_application(app, snapshot)
         raise
     _record_registration(app, config, resolved_store, engine, dependencies)
-    _log_enabled_config(config)
+    _log_enabled_config(config, has_auth_dependency=bool(dependencies))
     return resolved_store
+
+
+def _require_access_control(
+    config: InspectorConfig,
+    dependencies: Sequence[params.Depends],
+) -> None:
+    """로컬 환경이 아닌 활성 Inspector의 인증 설정을 검사한다."""
+    if (
+        config.enabled
+        and config.requires_access_control
+        and config.access_check is None
+        and not dependencies
+    ):
+        raise ValueError(
+            "access_check or an authentication dependency must be provided "
+            "to enable Inspector outside a local environment",
+        )
 
 
 def enable_inspector(
@@ -344,6 +368,7 @@ def enable_inspector(
         access_check=access_check,
         excluded_paths=excluded_paths,
     )
+    _require_access_control(config, resolved_dependencies)
     return _enable_with_config(
         app,
         config,

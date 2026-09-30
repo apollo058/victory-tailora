@@ -122,7 +122,7 @@ Git에서 제외해야 합니다.
   ```bash
   python -m venv .venv
   source .venv/bin/activate
-  python -m pip install -e ".[dev,fastapi]"
+  python -m pip install -e ".[dev,fastapi,example]"
   python -m uvicorn examples.fastapi.app:app --reload
   ```
 

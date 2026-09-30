@@ -127,6 +127,48 @@ def test_production_requires_access_check_before_registration():
     assert count_tailora_middleware(app) == 0
 
 
+@pytest.mark.parametrize("environment", ["staging", "stage", "preprod"])
+def test_shared_environment_requires_access_check_before_registration(environment):
+    """공유·검증 환경은 접근 제어 없이 Inspector를 켜지 못하게 한다."""
+    app = create_application()
+    original_routes = list(app.router.routes)
+
+    with pytest.raises(ValueError, match="access_check"):
+        enable_inspector(
+            app,
+            enabled=True,
+            environment=environment,
+        )
+
+    assert app.router.routes == original_routes
+    assert count_tailora_middleware(app) == 0
+
+
+def test_shared_environment_accepts_authentication_dependency(caplog):
+    """공유 환경은 명시적으로 전달한 인증 dependency를 사용할 수 있다."""
+    from fastapi import Depends, HTTPException
+
+    def require_key(api_key: str | None = None) -> None:
+        """테스트용 인증 키가 없으면 요청을 거부한다."""
+        if api_key != "test-key":
+            raise HTTPException(status_code=401)
+
+    app = create_application()
+    with caplog.at_level(logging.INFO):
+        enable_inspector(
+            app,
+            enabled=True,
+            environment="staging",
+            dependencies=[Depends(require_key)],
+        )
+
+    client = TestClient(app)
+    assert client.get("/__tailora/health").status_code == 401
+    assert client.get("/__tailora/health?api_key=test-key").status_code == 200
+    assert "access_control=True" in caplog.text
+    assert "no access control" not in caplog.text.lower()
+
+
 def test_access_check_protects_all_endpoints_assets_and_plugin():
     """하나의 접근 hook이 API·UI·asset·Swagger plugin에 모두 적용된다."""
 

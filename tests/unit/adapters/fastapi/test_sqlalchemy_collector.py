@@ -215,7 +215,7 @@ def test_database_error_captured_and_reraised(engine):
         assert len(ctx.queries) == 1
         query = ctx.queries[0]
         assert query.error is not None
-        assert "no such table" in (query.error.message or "").lower()
+        assert query.error.message is None
     finally:
         reset_current_context(token)
 

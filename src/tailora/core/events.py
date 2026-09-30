@@ -74,7 +74,7 @@ def _validate_total_query_time(value: Any, analyzed_time: float) -> float:
 
 @dataclass
 class ErrorSummary:
-    """민감한 원문을 포함하지 않는 오류 요약을 나타낸다."""
+    """수집 중 오류 정보를 전달하며 저장 전에는 종류 외 정보를 버린다."""
 
     type: str
     message: str | None = None
@@ -107,6 +107,7 @@ class QueryEvent:
     fingerprint: str | None = None
     database: str | None = None
     error: ErrorSummary | None = None
+    dialect: str | None = None
 
     def __post_init__(self) -> None:
         """쿼리 이벤트의 ID, 시간, 기간, 선택 필드를 검증한다."""
@@ -127,6 +128,11 @@ class QueryEvent:
         self.database = _require_text(
             self.database,
             "database",
+            optional=True,
+        )
+        self.dialect = _require_text(
+            self.dialect,
+            "dialect",
             optional=True,
         )
         if self.error is not None and not isinstance(self.error, ErrorSummary):

@@ -24,12 +24,12 @@ pre-release 후보(`0.1.0rc1`)를 준비했습니다. 실제 PyPI 업로드는
 
 ## Development setup
 
-Create a virtual environment and install the package with development and FastAPI tools:
+Create a virtual environment and install the package with development and example tools:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[dev,fastapi]"
+python -m pip install -e ".[dev,fastapi,example]"
 ```
 
 Run the checks:
@@ -87,8 +87,9 @@ enable_inspector(
 
 production에서는 `enabled=True`와 `allow_in_production=True`를 모두 지정해야
 합니다. 이 설정은 인증이나 네트워크 보호를 대신하지 않으므로, production에서
-사용하려면 `access_check`와 방화벽·사내망 제한을 함께 적용하십시오. 자세한
-보안 경계는 [보안 가이드](docs/security.md)에 정리되어 있습니다.
+사용하려면 `access_check` 또는 인증 dependency와 방화벽·사내망 제한을 함께
+적용하십시오. 자세한 보안 경계는 [보안 가이드](docs/security.md)에 정리되어
+있습니다.
 
 ## Product idea
 

@@ -92,12 +92,6 @@ def test_max_statement_length_below_minimum_is_rejected():
         RedactionPolicy(max_statement_length=1)
 
 
-def test_max_error_length_below_minimum_is_rejected():
-    """최대 오류 메시지 길이가 안전한 최솟값보다 작으면 거부한다."""
-    with pytest.raises(ValueError, match="max_error_length"):
-        RedactionPolicy(max_error_length=1)
-
-
 @pytest.mark.parametrize(
     "kwargs",
     [
@@ -167,54 +161,47 @@ def test_redact_event_sanitizes_existing_query_fingerprint():
     assert result.queries[0].fingerprint is None
 
 
-def test_redact_event_redacts_dsn_in_error_message():
-    """redact_event가 오류 메시지의 연결 문자열을 제거하는지 확인한다."""
+def test_redact_event_drops_invalid_sql_dialect_metadata():
+    """SQL 방언 메타데이터에 연결 정보가 들어오면 결과에서 제거한다."""
+    query = make_query(1, statement="SELECT 1")
+    query.dialect = "postgresql://user:password@database/private"
+    event = make_event(queries=[query])
+
+    result = redact_event(event)
+
+    assert result.queries[0].dialect is None
+
+
+def test_redact_event_drops_arbitrary_error_text():
+    """저장·응답 전 오류 원문과 경로 힌트를 모두 버리는지 확인한다."""
     error = ErrorSummary(
         type="DatabaseError",
-        message="connection failed: postgresql://user:pass@host/db",
+        message="Duplicate entry 'customer-48291' for users@example.com",
+        stack_hint="/srv/app/handlers.py:42",
     )
     event = make_event(error=error)
 
     result = redact_event(event)
 
     assert result.error is not None
-    assert "pass" not in (result.error.message or "")
+    assert result.error.message is None
+    assert result.error.stack_hint is None
 
 
-def test_redact_error_summary_removes_secret_assignments_and_windows_paths():
-    """오류 메시지의 비밀값과 Windows 경로를 제거하는지 확인한다."""
+def test_redact_error_summary_drops_untrusted_fields_and_bounds_type():
+    """임의 오류 문자열을 버리고 오류 타입도 안전한 이름으로 제한한다."""
     error = ErrorSummary(
-        type="RuntimeError",
-        message=(
-            "token=secret password=hunter2 "
-            r"C:\Users\victory\project\app.py:42"
-        ),
+        type="RuntimeError token=secret",
+        message="customer-48291",
+        stack_hint="C:\\Users\\victory\\project\\app.py:42",
     )
 
     result = redact_error_summary(error)
 
     assert result is not None
-    assert "secret" not in (result.message or "")
-    assert "hunter2" not in (result.message or "")
-    assert r"C:\Users\victory\project" not in (result.message or "")
-
-
-@pytest.mark.parametrize("header_name", ["cookie", "set-cookie"])
-def test_redact_error_summary_redacts_all_cookie_pairs(header_name):
-    """오류 메시지의 쿠키 값 전체를 제거하는지 확인한다."""
-    error = ErrorSummary(
-        type="RuntimeError",
-        message=(
-            f"request failed: {header_name}=session-secret; "
-            "csrftoken=csrf-secret"
-        ),
-    )
-
-    result = redact_error_summary(error)
-
-    assert result is not None
-    assert "session-secret" not in (result.message or "")
-    assert "csrf-secret" not in (result.message or "")
+    assert result.type == "Error"
+    assert result.message is None
+    assert result.stack_hint is None
 
 
 def test_redact_event_preserves_error_type():
@@ -300,30 +287,6 @@ def test_redact_event_with_no_error_keeps_none():
     event = make_event()
     result = redact_event(event)
     assert result.error is None
-
-
-def test_redact_error_summary_removes_file_path():
-    """오류 요약의 stack_hint에서 파일 경로가 제거되는지 확인한다."""
-    error = ErrorSummary(
-        type="RuntimeError",
-        stack_hint="/home/user/app/handlers.py:42",
-    )
-    policy = RedactionPolicy()
-    result = redact_error_summary(error, policy)
-
-    assert result is not None
-    assert "/home/user/app/handlers.py" not in (result.stack_hint or "")
-
-
-def test_redact_error_summary_truncates_long_message():
-    """오류 메시지가 최대 길이를 초과하면 잘리는지 확인한다."""
-    long_message = "error " * 200
-    error = ErrorSummary(type="RuntimeError", message=long_message)
-    policy = RedactionPolicy(max_error_length=100)
-    result = redact_error_summary(error, policy)
-
-    assert result is not None
-    assert len(result.message or "") <= 100
 
 
 def test_redact_error_summary_with_none_returns_none():
