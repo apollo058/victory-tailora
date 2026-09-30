@@ -10,36 +10,10 @@ from tailora.core.policies import RedactionPolicy
 
 REDACTED: str = "[REDACTED]"
 
-_DSN_PATTERN: re.Pattern[str] = re.compile(r"\w+://\S+")
-_PATH_PATTERN: re.Pattern[str] = re.compile(r"(/[a-zA-Z0-9_./-]{3,})")
-_WINDOWS_PATH_PATTERN: re.Pattern[str] = re.compile(
-    r"\b[A-Za-z]:[\\/][^\s,;]+",
-)
-_RELATIVE_PATH_PATTERN: re.Pattern[str] = re.compile(
-    r"(?<![\w/])(?:\.\.?[\\/])?(?:[\w.-]+[\\/])+"
-    r"[\w.-]+\.(?:py|js|ts|go|java|sql)(?::\d+)?",
-    re.IGNORECASE,
-)
-_COOKIE_ASSIGNMENT_PATTERN: re.Pattern[str] = re.compile(
-    r"(?P<key>\b(?:cookie|set-cookie)\b)"
-    r"(?P<separator>\s*[:=]\s*)[^\r\n]+",
-    re.IGNORECASE,
-)
-_SECRET_ASSIGNMENT_PATTERN: re.Pattern[str] = re.compile(
-    r"(?P<key>\b(?:authorization|password|passwd|pwd|"
-    r"token|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|"
-    r"client[_-]?secret)\b)"
-    r"(?P<separator>\s*[:=]\s*)(?:bearer\s+)?[^\s,;]+",
-    re.IGNORECASE,
-)
-_BEARER_PATTERN: re.Pattern[str] = re.compile(
-    r"\bBearer\s+[^\s,;]+",
-    re.IGNORECASE,
-)
-_EMAIL_PATTERN: re.Pattern[str] = re.compile(
-    r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
-)
 _NUMBER_LITERAL: re.Pattern[str] = re.compile(r"\b\d+(?:\.\d+)?\b")
+_ERROR_TYPE_PATTERN: re.Pattern[str] = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
+_DATABASE_NAME_PATTERN: re.Pattern[str] = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+_DIALECT_NAME_PATTERN: re.Pattern[str] = re.compile(r"[A-Za-z0-9_-]{1,32}")
 _DOLLAR_QUOTE_OPEN: re.Pattern[str] = re.compile(
     r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$",
 )
@@ -122,6 +96,8 @@ def redact_query_params(
 def redact_sql_statement(
     statement: str | None,
     policy: RedactionPolicy | None = None,
+    *,
+    dialect: str | None = None,
 ) -> str | None:
     """SQL의 리터럴·주석을 제거하고 길이를 제한한다.
 
@@ -132,14 +108,18 @@ def redact_sql_statement(
     if statement is None:
         return None
     try:
-        safe = _redact_sql_fragments(statement)
+        safe = _redact_sql_fragments(statement, dialect)
         result = truncate_str(safe, policy.max_statement_length)
         return result or None
     except Exception:
         return None
 
 
-def make_sql_fingerprint(statement: str | None) -> str | None:
+def make_sql_fingerprint(
+    statement: str | None,
+    *,
+    dialect: str | None = None,
+) -> str | None:
     """SQL 원문에서 값을 정규화한 fingerprint 문자열을 만든다.
 
     리터럴과 주석을 제거하고, 공백을 정규화하며 소문자로 변환한다.
@@ -147,7 +127,7 @@ def make_sql_fingerprint(statement: str | None) -> str | None:
     if statement is None:
         return None
     try:
-        fingerprint = _redact_sql_fragments(statement)
+        fingerprint = _redact_sql_fragments(statement, dialect)
         fingerprint = re.sub(r"\s+", " ", fingerprint).strip().lower()
         return fingerprint or None
     except Exception:
@@ -156,56 +136,33 @@ def make_sql_fingerprint(statement: str | None) -> str | None:
 
 def redact_error_summary(
     error: ErrorSummary | None,
-    policy: RedactionPolicy | None = None,
 ) -> ErrorSummary | None:
-    """오류 요약에서 비밀값·경로를 제거하고 길이를 제한한다.
+    """오류 원문과 경로는 버리고 안전한 오류 타입만 남긴다.
 
-    처리 중 오류가 발생하면 타입만 남긴 안전한 오류 요약을 반환한다.
+    오류 문구는 사용자 입력이나 연결 정보가 섞일 수 있어 정규식 마스킹에
+    기대지 않는다.
     """
-    if policy is None:
-        policy = RedactionPolicy()
     if error is None:
         return None
     try:
-        message = _redact_error_text(error.message, policy.max_error_length)
-        stack_hint = _redact_error_text(error.stack_hint, policy.max_error_length)
-        return ErrorSummary(
-            type=error.type,
-            message=message,
-            stack_hint=stack_hint,
-        )
+        safe_type = error.type
+        if _ERROR_TYPE_PATTERN.fullmatch(safe_type) is None:
+            safe_type = "Error"
+        return ErrorSummary(type=safe_type)
     except Exception:
-        return ErrorSummary(type=error.type)
+        return ErrorSummary(type="Error")
 
 
-def _redact_error_text(text: str | None, max_length: int) -> str | None:
-    """오류 텍스트에서 민감한 패턴을 제거하고 길이를 제한한다."""
-    if text is None:
-        return None
-    safe = _DSN_PATTERN.sub(REDACTED, text)
-    safe = _WINDOWS_PATH_PATTERN.sub(REDACTED, safe)
-    safe = _PATH_PATTERN.sub(REDACTED, safe)
-    safe = _RELATIVE_PATH_PATTERN.sub(REDACTED, safe)
-    safe = _COOKIE_ASSIGNMENT_PATTERN.sub(_replace_secret_assignment, safe)
-    safe = _SECRET_ASSIGNMENT_PATTERN.sub(_replace_secret_assignment, safe)
-    safe = _BEARER_PATTERN.sub(f"Bearer {REDACTED}", safe)
-    safe = _EMAIL_PATTERN.sub(REDACTED, safe)
-    result = truncate_str(safe, max_length)
-    return result or None
-
-
-def _replace_secret_assignment(match: re.Match[str]) -> str:
-    """비밀값 대입 표현에서 값만 안전한 표기로 바꾼다."""
-    return f"{match.group('key')}{match.group('separator')}{REDACTED}"
-
-
-def _redact_sql_fragments(statement: str) -> str:
+def _redact_sql_fragments(statement: str, dialect: str | None = None) -> str:
     """SQL 문자열·주석·숫자 리터럴을 순서대로 제거한다."""
     fragments: list[str] = []
     index = 0
     while index < len(statement):
         if statement.startswith("--", index):
             index = _redact_line_comment(statement, index, fragments)
+            continue
+        if statement.startswith("#", index) and _uses_hash_comments(dialect):
+            index = _redact_line_comment(statement, index, fragments, "#")
             continue
         if statement.startswith("/*", index):
             index = _redact_block_comment(statement, index, fragments)
@@ -232,14 +189,22 @@ def _redact_line_comment(
     statement: str,
     index: int,
     fragments: list[str],
+    marker: str = "--",
 ) -> int:
     """SQL 한 줄 주석의 내용을 제거하고 다음 줄 위치를 반환한다."""
-    fragments.append(f"-- {REDACTED}")
-    line_end = statement.find("\n", index + 2)
+    fragments.append(f"{marker} {REDACTED}")
+    line_end = statement.find("\n", index + len(marker))
     if line_end == -1:
         return len(statement)
     fragments.append("\n")
     return line_end + 1
+
+
+def _uses_hash_comments(dialect: str | None) -> bool:
+    """해시 주석 문법을 쓰는 DB이거나 방언이 알려지지 않았는지 확인한다."""
+    if dialect is None:
+        return True
+    return dialect.strip().lower() in {"mysql", "mariadb"}
 
 
 def _redact_block_comment(
@@ -285,30 +250,45 @@ def _redact_query_event(
     policy: RedactionPolicy,
 ) -> QueryEvent:
     """쿼리 이벤트의 민감한 필드를 제거하고 새 이벤트를 반환한다."""
-    safe_statement = redact_sql_statement(query.statement, policy)
-    safe_fingerprint = _safe_query_fingerprint(query.statement, policy)
-    safe_database = _redact_error_text(
-        query.database,
-        policy.max_error_length,
+    safe_fingerprint = _safe_query_fingerprint(
+        query.statement,
+        policy,
+        query.dialect,
     )
+    safe_database = query.database
+    if safe_database is not None and (
+        _DATABASE_NAME_PATTERN.fullmatch(safe_database) is None
+    ):
+        safe_database = "database"
+    safe_dialect = query.dialect
+    if safe_dialect is not None and (
+        _DIALECT_NAME_PATTERN.fullmatch(safe_dialect) is None
+    ):
+        safe_dialect = None
     return dataclasses.replace(
         query,
-        statement=safe_statement,
+        statement=redact_sql_statement(
+            query.statement,
+            policy,
+            dialect=query.dialect,
+        ),
         fingerprint=safe_fingerprint,
         database=safe_database,
-        error=redact_error_summary(query.error, policy),
+        error=redact_error_summary(query.error),
+        dialect=safe_dialect,
     )
 
 
 def _safe_query_fingerprint(
     statement: str | None,
     policy: RedactionPolicy,
+    dialect: str | None,
 ) -> str | None:
     """안전한 SQL statement에서만 fingerprint를 다시 만든다."""
     if statement is None:
         return None
     return truncate_str(
-        make_sql_fingerprint(statement),
+        make_sql_fingerprint(statement, dialect=dialect),
         policy.max_statement_length,
     )
 
@@ -339,5 +319,5 @@ def redact_event(
             truncate_str(event.route_template, policy.max_route_length) or "/"
         ),
         queries=redacted_queries,
-        error=redact_error_summary(event.error, policy),
+        error=redact_error_summary(event.error),
     )

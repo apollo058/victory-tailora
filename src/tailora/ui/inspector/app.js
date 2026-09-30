@@ -210,85 +210,8 @@
       ul.className = 'request-list';
       ul.setAttribute('role', 'listbox');
       ul.setAttribute('aria-label', '최근 요청 목록');
-
       items.forEach((item, index) => {
-        const isSelected = item.request_id === selectedId;
-        const li = document.createElement('li');
-        li.className = `request-item ${isSelected ? 'selected' : ''}`;
-        li.setAttribute('role', 'option');
-        li.setAttribute('aria-selected', isSelected ? 'true' : 'false');
-        li.setAttribute('tabindex', '0');
-        li.dataset.requestId = item.request_id;
-        li.dataset.index = String(index);
-
-        const statusCategory = `${Math.floor(item.status_code / 100)}xx`;
-        const methodUpper = (item.method || 'GET').toUpperCase();
-
-        // Signals 표시
-        let signalsHtml = '';
-        if (item.signals) {
-          if (item.signals.slow_request) {
-            signalsHtml += `<span class="signal-pill signal-slow" title="느린 요청 (임계값 초과)">SLOW</span>`;
-          }
-          if (item.signals.has_duplicate_query) {
-            signalsHtml += `<span class="signal-pill signal-dup" title="중복 쿼리 (N+1 의심)">N+1 DUP</span>`;
-          }
-          if (item.signals.has_slow_query) {
-            signalsHtml += `<span class="signal-pill signal-slow" title="느린 쿼리 포함">SLOW Q</span>`;
-          }
-          if (item.signals.query_heavy) {
-            signalsHtml += `<span class="signal-pill signal-heavy" title="쿼리 실행 과다">HEAVY</span>`;
-          }
-        }
-
-        li.innerHTML = `
-          <div class="request-item-top">
-            <div class="method-route">
-              <span class="method-tag method-${methodUpper}">${methodUpper}</span>
-              <span class="route-text" title="${escapeHtml(item.route_template)}">${escapeHtml(item.route_template)}</span>
-            </div>
-            <div class="status-duration">
-              <span class="status-badge status-${statusCategory}">${item.status_code}</span>
-              <span class="duration-text">${item.duration_ms.toFixed(1)}ms</span>
-            </div>
-          </div>
-          <div class="request-item-bottom">
-            <div class="query-summary">
-              <span>SQL: ${item.query_count}건</span>
-              <span>시간: ${item.query_time_ms.toFixed(1)}ms</span>
-            </div>
-            <div class="signals-container">
-              ${signalsHtml}
-            </div>
-          </div>
-        `;
-
-        // 마우스 클릭 및 키보드 선택 이벤트
-        li.addEventListener('click', () => controller.selectRequest(item.request_id));
-        li.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            controller.selectRequest(item.request_id);
-          } else if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            const next = li.nextElementSibling;
-            if (next) {
-              next.focus();
-              const nextId = next.dataset.requestId;
-              if (nextId) controller.selectRequest(nextId);
-            }
-          } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            const prev = li.previousElementSibling;
-            if (prev) {
-              prev.focus();
-              const prevId = prev.dataset.requestId;
-              if (prevId) controller.selectRequest(prevId);
-            }
-          }
-        });
-
-        ul.appendChild(li);
+        ul.appendChild(createRequestListItem(item, index, selectedId));
       });
 
       elements.listContainer.innerHTML = '';
@@ -320,245 +243,302 @@
         renderer.renderDetailPlaceholder('요청 데이터를 찾을 수 없거나 만료되었습니다.', '요청을 찾을 수 없음');
         return;
       }
-
-      // 1. 헤더 액션 (ID 복사 버튼)
-      elements.detailActions.innerHTML = `
-        <button type="button" class="btn" id="btn-copy-id" title="요청 ID 복사">
-          <span>ID 복사</span>
-        </button>
-      `;
-      const btnCopy = document.getElementById('btn-copy-id');
-      if (btnCopy) {
-        btnCopy.addEventListener('click', () => {
-          navigator.clipboard.writeText(detail.request_id);
-          btnCopy.innerHTML = '<span>복사됨!</span>';
-          setTimeout(() => {
-            btnCopy.innerHTML = '<span>ID 복사</span>';
-          }, 1500);
-        });
-      }
-
-      // 2. 에러 박스
-      let errorHtml = '';
-      if (detail.error) {
-        errorHtml = `
-          <div class="error-box">
-            <div class="error-title">🚨 ${escapeHtml(detail.error.type || 'Error')}</div>
-            <div class="error-msg">${escapeHtml(detail.error.message || '오류 상세 정보 없음')}</div>
-          </div>
-        `;
-      }
-
-      // 3. 신호 상세 카드
-      let signalCardsHtml = '';
       const sig = detail.signals || {};
       const appliedThresh = sig.applied_thresholds || {};
       const queries = detail.queries || [];
-
-      // 3.1 Slow Request 카드
-      if (sig.slow_request) {
-        signalCardsHtml += `
-          <div class="signal-card card-slow">
-            <div class="signal-card-header">
-              <strong class="signal-card-title">⚠️ 느린 요청 (Slow Request)</strong>
-              <span class="signal-pill signal-slow">기준 초과</span>
-            </div>
-            <p class="signal-card-desc">
-              소요 시간 <strong>${detail.duration_ms.toFixed(1)}ms</strong>가 설정된 임계값 <strong>${appliedThresh.slow_request_ms}ms</strong>를 초과했습니다.
-            </p>
-          </div>
-        `;
-      }
-
-      // 3.2 Slow Query 카드 (sequence 및 실제 실행 시간 표시)
-      if (sig.slow_queries && sig.slow_queries.length > 0) {
-        const slowQueryItems = sig.slow_queries.map(seq => {
-          const matchedQ = queries.find(q => q.sequence === seq);
-          const dur = matchedQ ? `${matchedQ.duration_ms.toFixed(1)}ms` : '기준 초과';
-          return `<li>Query #${seq}: <strong>${dur}</strong></li>`;
-        }).join('');
-
-        signalCardsHtml += `
-          <div class="signal-card card-slow-query">
-            <div class="signal-card-header">
-              <strong class="signal-card-title">🐢 느린 쿼리 (Slow Queries)</strong>
-              <span class="signal-pill signal-slow">${sig.slow_queries.length}건 감지</span>
-            </div>
-            <p class="signal-card-desc">
-              임계값(<strong>${appliedThresh.slow_query_ms}ms</strong>) 이상 실행된 개별 SQL입니다:
-            </p>
-            <ul style="margin: 6px 0 0 16px; font-size: 11px; color: #475569;">
-              ${slowQueryItems}
-            </ul>
-          </div>
-        `;
-      }
-
-      // 3.3 Duplicate Queries 카드
-      if (sig.duplicate_queries && sig.duplicate_queries.length > 0) {
-        const dupList = sig.duplicate_queries.map(d =>
-          `<li>중복 횟수: <strong>${d.count}회</strong> (SQL Sequences: ${d.sequences.join(', ')})<br><span style="color:#64748b; font-family:var(--font-mono); font-size:10px;">${escapeHtml(d.fingerprint || '')}</span></li>`
-        ).join('');
-        signalCardsHtml += `
-          <div class="signal-card card-dup">
-            <div class="signal-card-header">
-              <strong class="signal-card-title">🔄 N+1 / 중복 쿼리 (Duplicate Queries)</strong>
-              <span class="signal-pill signal-dup">${sig.duplicate_queries.length}개 패턴</span>
-            </div>
-            <p class="signal-card-desc">동일한 패턴의 SQL이 1개 요청 내에서 반복 실행되었습니다.</p>
-            <ul style="margin: 6px 0 0 16px; font-size: 11px; color: #475569;">
-              ${dupList}
-            </ul>
-          </div>
-        `;
-      }
-
-      // 3.4 Query Heavy 카드
-      if (sig.query_heavy) {
-        const reasons = (sig.query_heavy_reasons || []).join(', ');
-        signalCardsHtml += `
-          <div class="signal-card card-heavy">
-            <div class="signal-card-header">
-              <strong class="signal-card-title">⚡ 쿼리 과다 실행 (Query Heavy)</strong>
-              <span class="signal-pill signal-heavy">${escapeHtml(reasons)}</span>
-            </div>
-            <p class="signal-card-desc">
-              실행된 쿼리 수(<strong>${detail.query_count}건</strong>) 또는 총 실행 시간(<strong>${detail.query_time_ms.toFixed(1)}ms</strong>)이 임계값을 초과했습니다.
-            </p>
-          </div>
-        `;
-      }
-
-      let signalsSectionHtml = '';
-      if (signalCardsHtml) {
-        signalsSectionHtml = `
-          <div class="signals-section">
-            <h3 class="section-title">진단 분석 신호 (Signals)</h3>
-            <div class="signal-cards-grid">
-              ${signalCardsHtml}
-            </div>
-          </div>
-        `;
-      }
-
-      // 4. 쿼리 목록 표
-      const slowSeqs = new Set(sig.slow_queries || []);
-      const dupSeqSet = new Set();
-      (sig.duplicate_queries || []).forEach(d => {
-        (d.sequences || []).forEach(s => dupSeqSet.add(s));
-      });
-
-      let queryRowsHtml = '';
-      if (queries.length === 0) {
-        queryRowsHtml = `
-          <tr>
-            <td colspan="5" style="text-align: center; color: #94a3b8; padding: 24px;">
-              이 요청에서 실행된 데이터베이스 쿼리가 없습니다.
-            </td>
-          </tr>
-        `;
-      } else {
-        queryRowsHtml = queries.map(q => {
-          let qBadge = '';
-          if (slowSeqs.has(q.sequence)) {
-            qBadge += `<span class="signal-pill signal-slow" style="margin-right:4px;">SLOW</span>`;
-          }
-          if (dupSeqSet.has(q.sequence)) {
-            qBadge += `<span class="signal-pill signal-dup">DUP</span>`;
-          }
-
-          const fpText = q.fingerprint ? `<div class="query-fingerprint" title="SQL Fingerprint">${escapeHtml(q.fingerprint)}</div>` : '';
-
-          return `
-            <tr>
-              <td class="query-seq">#${q.sequence}</td>
-              <td class="query-time">${q.duration_ms.toFixed(1)}ms</td>
-              <td class="query-db">${escapeHtml(q.database || 'db')}</td>
-              <td>
-                <div class="query-sql">${escapeHtml(q.statement)}</div>
-                ${fpText}
-              </td>
-              <td>${qBadge || '<span style="color:#cbd5e1;">-</span>'}</td>
-            </tr>
-          `;
-        }).join('');
-      }
-
-      // 타임스탬프 변환 (로컬 시간)
-      let formattedTime = detail.timestamp || '-';
-      try {
-        if (detail.timestamp) {
-          const d = new Date(detail.timestamp);
-          formattedTime = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', fractionDigit: 3 });
-        }
-      } catch (e) {}
+      renderDetailActions(detail.request_id);
 
       elements.detailContainer.innerHTML = `
         <div class="detail-content">
-          <!-- 상단 메트릭 요약 카드 (framework, timestamp 포함) -->
-          <div class="overview-card">
-            <div class="overview-metric">
-              <span class="metric-label">Route</span>
-              <span class="metric-val" style="font-size:13px;">${escapeHtml(detail.method)} ${escapeHtml(detail.route_template)}</span>
-            </div>
-            <div class="overview-metric">
-              <span class="metric-label">Framework</span>
-              <span class="metric-val">${escapeHtml(detail.framework || 'FastAPI')}</span>
-            </div>
-            <div class="overview-metric">
-              <span class="metric-label">Timestamp</span>
-              <span class="metric-val" style="font-size:12px;">${escapeHtml(formattedTime)}</span>
-            </div>
-            <div class="overview-metric">
-              <span class="metric-label">Status</span>
-              <span class="metric-val">${detail.status_code}</span>
-            </div>
-            <div class="overview-metric">
-              <span class="metric-label">Duration</span>
-              <span class="metric-val">${detail.duration_ms.toFixed(1)}ms</span>
-            </div>
-            <div class="overview-metric">
-              <span class="metric-label">SQL Count</span>
-              <span class="metric-val">${detail.query_count}건</span>
-            </div>
-            <div class="overview-metric">
-              <span class="metric-label">SQL Time</span>
-              <span class="metric-val">${detail.query_time_ms.toFixed(1)}ms</span>
-            </div>
-          </div>
-
-          <!-- 에러 박스 (존재 시) -->
-          ${errorHtml}
-
-          <!-- 진단 신호 카드 (존재 시) -->
-          ${signalsSectionHtml}
-
-          <!-- 쿼리 실행 표 (Statement 및 Fingerprint 행 단위 표시) -->
-          <div class="query-section">
-            <h3 class="section-title" style="margin-bottom: 10px;">
-              실행된 SQL 쿼리 (${queries.length}건)
-            </h3>
-            <div class="query-table-container">
-              <table class="query-table" aria-label="실행된 SQL 쿼리 목록">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>시간</th>
-                    <th>DB</th>
-                    <th>SQL Statement &amp; Fingerprint</th>
-                    <th>신호</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${queryRowsHtml}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          ${renderDetailOverview(detail)}
+          ${renderDetailError(detail.error)}
+          ${renderSignalSection(detail, sig, appliedThresh, queries)}
+          ${renderQueryTable(queries, sig)}
         </div>
       `;
     },
   };
+
+  function renderRequestSignals(signals) {
+    const pills = [];
+    if (!signals) return '';
+    if (signals.slow_request) {
+      pills.push('<span class="signal-pill signal-slow" title="느린 요청 (임계값 초과)">SLOW</span>');
+    }
+    if (signals.has_duplicate_query) {
+      pills.push('<span class="signal-pill signal-dup" title="중복 쿼리 (N+1 의심)">N+1 DUP</span>');
+    }
+    if (signals.has_slow_query) {
+      pills.push('<span class="signal-pill signal-slow" title="느린 쿼리 포함">SLOW Q</span>');
+    }
+    if (signals.query_heavy) {
+      pills.push('<span class="signal-pill signal-heavy" title="쿼리 실행 과다">HEAVY</span>');
+    }
+    return pills.join('');
+  }
+
+  function createRequestListItem(item, index, selectedId) {
+    const isSelected = item.request_id === selectedId;
+    const itemElement = document.createElement('li');
+    const statusCategory = `${Math.floor(item.status_code / 100)}xx`;
+    const methodUpper = (item.method || 'GET').toUpperCase();
+    itemElement.className = `request-item ${isSelected ? 'selected' : ''}`;
+    itemElement.setAttribute('role', 'option');
+    itemElement.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+    itemElement.setAttribute('tabindex', '0');
+    itemElement.dataset.requestId = item.request_id;
+    itemElement.dataset.index = String(index);
+    itemElement.innerHTML = `
+      <div class="request-item-top">
+        <div class="method-route">
+          <span class="method-tag method-${methodUpper}">${methodUpper}</span>
+          <span class="route-text" title="${escapeHtml(item.route_template)}">${escapeHtml(item.route_template)}</span>
+        </div>
+        <div class="status-duration">
+          <span class="status-badge status-${statusCategory}">${item.status_code}</span>
+          <span class="duration-text">${item.duration_ms.toFixed(1)}ms</span>
+        </div>
+      </div>
+      <div class="request-item-bottom">
+        <div class="query-summary">
+          <span>SQL: ${item.query_count}건</span>
+          <span>시간: ${item.query_time_ms.toFixed(1)}ms</span>
+        </div>
+        <div class="signals-container">${renderRequestSignals(item.signals)}</div>
+      </div>
+    `;
+    bindRequestItemEvents(itemElement, item.request_id);
+    return itemElement;
+  }
+
+  function bindRequestItemEvents(itemElement, requestId) {
+    itemElement.addEventListener('click', () => controller.selectRequest(requestId));
+    itemElement.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        controller.selectRequest(requestId);
+        return;
+      }
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      event.preventDefault();
+      const nextItem = event.key === 'ArrowDown'
+        ? itemElement.nextElementSibling
+        : itemElement.previousElementSibling;
+      if (!nextItem) return;
+      nextItem.focus();
+      if (nextItem.dataset.requestId) {
+        controller.selectRequest(nextItem.dataset.requestId);
+      }
+    });
+  }
+
+  function renderDetailActions(requestId) {
+    elements.detailActions.innerHTML = `
+      <button type="button" class="btn" id="btn-copy-id" title="요청 ID 복사">
+        <span>ID 복사</span>
+      </button>
+    `;
+    const copyButton = document.getElementById('btn-copy-id');
+    if (!copyButton) return;
+    copyButton.addEventListener('click', () => {
+      navigator.clipboard.writeText(requestId);
+      copyButton.innerHTML = '<span>복사됨!</span>';
+      setTimeout(() => {
+        copyButton.innerHTML = '<span>ID 복사</span>';
+      }, 1500);
+    });
+  }
+
+  function renderDetailError(error) {
+    if (!error) return '';
+    return `
+      <div class="error-box">
+        <div class="error-title">🚨 ${escapeHtml(error.type || 'Error')}</div>
+        <div class="error-msg">${escapeHtml(error.message || '오류 상세 정보 없음')}</div>
+      </div>
+    `;
+  }
+
+  function formatRequestTime(timestamp) {
+    if (!timestamp) return '-';
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return timestamp;
+    return date.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      fractionalSecondDigits: 3,
+    });
+  }
+
+  function renderDetailOverview(detail) {
+    return `
+      <div class="overview-card">
+        <div class="overview-metric">
+          <span class="metric-label">Route</span>
+          <span class="metric-val" style="font-size:13px;">${escapeHtml(detail.method)} ${escapeHtml(detail.route_template)}</span>
+        </div>
+        <div class="overview-metric">
+          <span class="metric-label">Framework</span>
+          <span class="metric-val">${escapeHtml(detail.framework || 'FastAPI')}</span>
+        </div>
+        <div class="overview-metric">
+          <span class="metric-label">Timestamp</span>
+          <span class="metric-val" style="font-size:12px;">${escapeHtml(formatRequestTime(detail.timestamp))}</span>
+        </div>
+        <div class="overview-metric">
+          <span class="metric-label">Status</span>
+          <span class="metric-val">${detail.status_code}</span>
+        </div>
+        <div class="overview-metric">
+          <span class="metric-label">Duration</span>
+          <span class="metric-val">${detail.duration_ms.toFixed(1)}ms</span>
+        </div>
+        <div class="overview-metric">
+          <span class="metric-label">SQL Count</span>
+          <span class="metric-val">${detail.query_count}건</span>
+        </div>
+        <div class="overview-metric">
+          <span class="metric-label">SQL Time</span>
+          <span class="metric-val">${detail.query_time_ms.toFixed(1)}ms</span>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderSlowRequestCard(detail, thresholds, signals) {
+    if (!signals.slow_request) return '';
+    return `
+      <div class="signal-card card-slow">
+        <div class="signal-card-header">
+          <strong class="signal-card-title">⚠️ 느린 요청 (Slow Request)</strong>
+          <span class="signal-pill signal-slow">기준 초과</span>
+        </div>
+        <p class="signal-card-desc">
+          소요 시간 <strong>${detail.duration_ms.toFixed(1)}ms</strong>가 설정된 임계값 <strong>${thresholds.slow_request_ms}ms</strong>를 초과했습니다.
+        </p>
+      </div>
+    `;
+  }
+
+  function renderSlowQueryCard(signals, thresholds, queries) {
+    if (!signals.slow_queries || signals.slow_queries.length === 0) return '';
+    const items = signals.slow_queries.map((sequence) => {
+      const query = queries.find((item) => item.sequence === sequence);
+      const duration = query ? `${query.duration_ms.toFixed(1)}ms` : '기준 초과';
+      return `<li>Query #${sequence}: <strong>${duration}</strong></li>`;
+    }).join('');
+    return `
+      <div class="signal-card card-slow-query">
+        <div class="signal-card-header">
+          <strong class="signal-card-title">🐢 느린 쿼리 (Slow Queries)</strong>
+          <span class="signal-pill signal-slow">${signals.slow_queries.length}건 감지</span>
+        </div>
+        <p class="signal-card-desc">
+          임계값(<strong>${thresholds.slow_query_ms}ms</strong>) 이상 실행된 개별 SQL입니다:
+        </p>
+        <ul style="margin: 6px 0 0 16px; font-size: 11px; color: #475569;">${items}</ul>
+      </div>
+    `;
+  }
+
+  function renderDuplicateQueryCard(signals) {
+    if (!signals.duplicate_queries || signals.duplicate_queries.length === 0) return '';
+    const items = signals.duplicate_queries.map((duplicate) => `
+      <li>중복 횟수: <strong>${duplicate.count}회</strong> (SQL Sequences: ${duplicate.sequences.join(', ')})<br>
+        <span style="color:#64748b; font-family:var(--font-mono); font-size:10px;">${escapeHtml(duplicate.fingerprint || '')}</span>
+      </li>
+    `).join('');
+    return `
+      <div class="signal-card card-dup">
+        <div class="signal-card-header">
+          <strong class="signal-card-title">🔄 N+1 / 중복 쿼리 (Duplicate Queries)</strong>
+          <span class="signal-pill signal-dup">${signals.duplicate_queries.length}개 패턴</span>
+        </div>
+        <p class="signal-card-desc">동일한 패턴의 SQL이 1개 요청 내에서 반복 실행되었습니다.</p>
+        <ul style="margin: 6px 0 0 16px; font-size: 11px; color: #475569;">${items}</ul>
+      </div>
+    `;
+  }
+
+  function renderQueryHeavyCard(detail, signals) {
+    if (!signals.query_heavy) return '';
+    const reasons = (signals.query_heavy_reasons || []).join(', ');
+    return `
+      <div class="signal-card card-heavy">
+        <div class="signal-card-header">
+          <strong class="signal-card-title">⚡ 쿼리 과다 실행 (Query Heavy)</strong>
+          <span class="signal-pill signal-heavy">${escapeHtml(reasons)}</span>
+        </div>
+        <p class="signal-card-desc">
+          실행된 쿼리 수(<strong>${detail.query_count}건</strong>) 또는 총 실행 시간(<strong>${detail.query_time_ms.toFixed(1)}ms</strong>)이 임계값을 초과했습니다.
+        </p>
+      </div>
+    `;
+  }
+
+  function renderSignalSection(detail, signals, thresholds, queries) {
+    const cards = [
+      renderSlowRequestCard(detail, thresholds, signals),
+      renderSlowQueryCard(signals, thresholds, queries),
+      renderDuplicateQueryCard(signals),
+      renderQueryHeavyCard(detail, signals),
+    ].join('');
+    if (!cards) return '';
+    return `
+      <div class="signals-section">
+        <h3 class="section-title">진단 분석 신호 (Signals)</h3>
+        <div class="signal-cards-grid">${cards}</div>
+      </div>
+    `;
+  }
+
+  function renderQueryRow(query, slowSequences, duplicateSequences) {
+    const badges = [];
+    if (slowSequences.has(query.sequence)) {
+      badges.push('<span class="signal-pill signal-slow" style="margin-right:4px;">SLOW</span>');
+    }
+    if (duplicateSequences.has(query.sequence)) {
+      badges.push('<span class="signal-pill signal-dup">DUP</span>');
+    }
+    const fingerprint = query.fingerprint
+      ? `<div class="query-fingerprint" title="SQL Fingerprint">${escapeHtml(query.fingerprint)}</div>`
+      : '';
+    return `
+      <tr>
+        <td class="query-seq">#${query.sequence}</td>
+        <td class="query-time">${query.duration_ms.toFixed(1)}ms</td>
+        <td class="query-db">${escapeHtml(query.database || 'db')}</td>
+        <td><div class="query-sql">${escapeHtml(query.statement)}</div>${fingerprint}</td>
+        <td>${badges.join('') || '<span style="color:#cbd5e1;">-</span>'}</td>
+      </tr>
+    `;
+  }
+
+  function renderQueryTable(queries, signals) {
+    const slowSequences = new Set(signals.slow_queries || []);
+    const duplicateSequences = new Set(
+      (signals.duplicate_queries || []).flatMap((item) => item.sequences || []),
+    );
+    const rows = queries.length
+      ? queries.map((query) => renderQueryRow(
+        query,
+        slowSequences,
+        duplicateSequences,
+      )).join('')
+      : '<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:24px;">이 요청에서 실행된 데이터베이스 쿼리가 없습니다.</td></tr>';
+    return `
+      <div class="query-section">
+        <h3 class="section-title" style="margin-bottom: 10px;">실행된 SQL 쿼리 (${queries.length}건)</h3>
+        <div class="query-table-container">
+          <table class="query-table" aria-label="실행된 SQL 쿼리 목록">
+            <thead><tr><th>#</th><th>시간</th><th>DB</th><th>SQL Statement &amp; Fingerprint</th><th>신호</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
 
   // 6. 컨트롤러 (상태 관리 및 사용자 액션)
   const controller = {
@@ -580,88 +560,102 @@
     },
 
     async loadData() {
-      state.token += 1;
-      const currentToken = state.token;
-
+      const currentToken = ++state.token;
       state.status = 'loading';
       renderer.renderListLoading();
       renderer.renderAggregateLoading();
 
       try {
-        // 1. Health 체크
-        let health;
-        try {
-          health = await api.checkHealth();
-        } catch (healthErr) {
-          if (currentToken !== state.token) return;
-          state.status = 'disabled';
-          renderer.updateStatusPill('disabled', 'Inspector Inactive');
-          renderer.renderListDisabled('Inspector API 서비스에 연결할 수 없거나 비활성화되었습니다.');
-          renderer.renderAggregateError('Inspector 집계 API에 연결할 수 없습니다.');
-          renderer.renderDetailPlaceholder('Inspector가 비활성화되어 상세 정보를 조회할 수 없습니다.', '비활성 상태');
-          return;
-        }
-
-        if (currentToken !== state.token) return;
-
-        if (health.status !== 'ok') {
-          state.status = 'disabled';
-          renderer.updateStatusPill('disabled', 'Inspector Disabled');
-          renderer.renderListDisabled('서버의 Inspector 상태가 정상(ok)이 아닙니다.');
-          return;
-        }
-
-        renderer.updateStatusPill('ok', `Active (${health.stored_requests}/${health.capacity})`);
-
-        // 2. 최근 요청 목록 조회
-        const [requestResult, aggregateResult] = await Promise.allSettled([
-          api.fetchRequests(),
-          api.fetchAggregates(),
-        ]);
-        if (currentToken !== state.token) return;
-
-        if (requestResult.status === 'rejected') {
-          throw requestResult.reason;
-        }
-
-        const data = requestResult.value;
-        state.requests = data.items || [];
-        if (aggregateResult.status === 'fulfilled') {
-          renderer.renderAggregates(aggregateResult.value);
-        } else {
-          renderer.renderAggregateError(aggregateResult.reason.message);
-        }
-        renderer.updateLastRefreshed();
-
-        if (state.requests.length === 0) {
-          state.status = 'empty';
-          state.selectedRequestId = null;
-          state.selectedRequestDetail = null;
-          renderer.renderListEmpty();
-          renderer.renderDetailPlaceholder();
-          return;
-        }
-
-        state.status = 'ready';
-
-        // 기존에 선택된 항목이 현재 목록에 남아있는지 확인
-        const stillExists = state.requests.some(r => r.request_id === state.selectedRequestId);
-        if (!stillExists) {
-          // 기존 선택 항목이 없거나 사라진 경우 첫 번째 항목을 자동 선택
-          state.selectedRequestId = state.requests[0].request_id;
-        }
-
-        renderer.renderList(state.requests, state.selectedRequestId);
-        await controller.loadDetail(state.selectedRequestId, currentToken);
-
+        if (!await this.loadHealth(currentToken)) return;
+        const data = await this.fetchDashboardData(currentToken);
+        if (!data || currentToken !== state.token) return;
+        await this.renderDashboardData(data, currentToken);
       } catch (err) {
-        if (currentToken !== state.token) return;
-        state.status = 'error';
-        state.errorMessage = err.message;
-        renderer.updateStatusPill('err', 'Disconnected');
-        renderer.renderListError(err.message);
-        renderer.renderAggregateError(err.message);
+        this.renderLoadError(err, currentToken);
       }
+    },
+
+    async loadHealth(token) {
+      let health;
+      try {
+        health = await api.checkHealth();
+      } catch (error) {
+        if (token === state.token) this.renderDisabledState('Inspector Inactive');
+        return false;
+      }
+      if (token !== state.token) return false;
+      if (health.status !== 'ok') {
+        state.status = 'disabled';
+        renderer.updateStatusPill('disabled', 'Inspector Disabled');
+        renderer.renderListDisabled('서버의 Inspector 상태가 정상(ok)이 아닙니다.');
+        return false;
+      }
+      renderer.updateStatusPill(
+        'ok',
+        `Active (${health.stored_requests}/${health.capacity})`,
+      );
+      return true;
+    },
+
+    renderDisabledState(label) {
+      state.status = 'disabled';
+      renderer.updateStatusPill('disabled', label);
+      renderer.renderListDisabled(
+        'Inspector API 서비스에 연결할 수 없거나 비활성화되었습니다.',
+      );
+      renderer.renderAggregateError('Inspector 집계 API에 연결할 수 없습니다.');
+      renderer.renderDetailPlaceholder(
+        'Inspector가 비활성화되어 상세 정보를 조회할 수 없습니다.',
+        '비활성 상태',
+      );
+    },
+
+    async fetchDashboardData(token) {
+      const [requestResult, aggregateResult] = await Promise.allSettled([
+        api.fetchRequests(),
+        api.fetchAggregates(),
+      ]);
+      if (token !== state.token) return null;
+      if (requestResult.status === 'rejected') throw requestResult.reason;
+      return { requestData: requestResult.value, aggregateResult };
+    },
+
+    async renderDashboardData(data, token) {
+      state.requests = data.requestData.items || [];
+      if (data.aggregateResult.status === 'fulfilled') {
+        renderer.renderAggregates(data.aggregateResult.value);
+      } else {
+        renderer.renderAggregateError(data.aggregateResult.reason.message);
+      }
+      renderer.updateLastRefreshed();
+      if (state.requests.length === 0) {
+        state.status = 'empty';
+        state.selectedRequestId = null;
+        state.selectedRequestDetail = null;
+        renderer.renderListEmpty();
+        renderer.renderDetailPlaceholder();
+        return;
+      }
+      state.status = 'ready';
+      this.selectAvailableRequest();
+      renderer.renderList(state.requests, state.selectedRequestId);
+      await controller.loadDetail(state.selectedRequestId, token);
+    },
+
+    selectAvailableRequest() {
+      const stillExists = state.requests.some(
+        (request) => request.request_id === state.selectedRequestId,
+      );
+      if (!stillExists) state.selectedRequestId = state.requests[0].request_id;
+    },
+
+    renderLoadError(error, token) {
+      if (token !== state.token) return;
+      state.status = 'error';
+      state.errorMessage = error.message;
+      renderer.updateStatusPill('err', 'Disconnected');
+      renderer.renderListError(error.message);
+      renderer.renderAggregateError(error.message);
     },
 
     async selectRequest(requestId) {

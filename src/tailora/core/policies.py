@@ -22,12 +22,10 @@ DEFAULT_BLOCKED_QUERY_KEYS: frozenset[str] = frozenset({
 })
 
 _MIN_STATEMENT_LENGTH: int = 64
-_MIN_ERROR_LENGTH: int = 32
 _MIN_ROUTE_LENGTH: int = 16
 _MIN_HEADER_VALUE_LENGTH: int = 16
 _MIN_QUERY_KEY_LENGTH: int = 16
 _MAX_STATEMENT_LENGTH: int = 65536
-_MAX_ERROR_LENGTH: int = 8192
 _MAX_ROUTE_LENGTH: int = 8192
 _MAX_HEADER_VALUE_LENGTH: int = 65536
 _MAX_QUERY_KEY_LENGTH: int = 1024
@@ -127,7 +125,6 @@ class RedactionPolicy:
     max_headers: int = 100
     max_query_params: int = 100
     max_statement_length: int = 4096
-    max_error_length: int = 512
     max_route_length: int = 1024
     max_header_value_length: int = 4096
     max_query_key_length: int = 256
@@ -169,7 +166,6 @@ class RedactionPolicy:
         """저장 또는 응답할 문자열의 길이 제한을 검증한다."""
         fields = (
             ("max_statement_length", _MIN_STATEMENT_LENGTH, _MAX_STATEMENT_LENGTH),
-            ("max_error_length", _MIN_ERROR_LENGTH, _MAX_ERROR_LENGTH),
             ("max_route_length", _MIN_ROUTE_LENGTH, _MAX_ROUTE_LENGTH),
             (
                 "max_header_value_length",

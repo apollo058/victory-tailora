@@ -21,7 +21,7 @@ from tailora.core.analysis import (
 )
 from tailora.core.events import RequestEvent
 from tailora.core.policies import RedactionPolicy, ThresholdPolicy
-from tailora.core.privacy import redact_event
+from tailora.core.privacy import redact_error_summary, redact_event
 from tailora.core.serialization import request_event_to_dict
 from tailora.core.store import RingBuffer
 
@@ -86,12 +86,13 @@ def _summarize_request(
     threshold_policy: ThresholdPolicy,
 ) -> dict[str, Any]:
     """요청 이벤트에서 목록 표시에 필요한 요약과 신호를 추출한다."""
+    safe_error = redact_error_summary(event.error)
     error_summary = None
-    if event.error is not None:
+    if safe_error is not None:
         error_summary = {
-            "type": event.error.type,
-            "message": event.error.message,
-            "stack_hint": event.error.stack_hint,
+            "type": safe_error.type,
+            "message": safe_error.message,
+            "stack_hint": safe_error.stack_hint,
         }
     return {
         "request_id": event.request_id,
@@ -229,7 +230,7 @@ def _add_aggregate_route(
     ) -> dict[str, Any]:
         """저장된 이벤트의 경로·Fingerprint 집계와 임계값을 반환한다."""
         _set_no_store_header(response)
-        events = [redact_event(event, policy) for event in store._latest_view()]
+        events = [redact_event(event, policy) for event in store.latest_view()]
         aggregates = compute_aggregates(events)
         route_count = len(aggregates["routes"])
         fingerprint_count = len(aggregates["fingerprints"])
@@ -326,8 +327,13 @@ def create_inspector_router(
     access_check: AccessCheck | None = None,
     default_limit: int = 20,
     max_limit: int = 100,
+    allow_unauthenticated: bool = False,
 ) -> APIRouter:
-    """지정된 저장소를 읽는 제한된 Inspector APIRouter를 생성한다."""
+    """저장소를 읽는 Router를 만든다.
+
+    직접 사용할 때는 접근 hook이나 인증 dependency를 지정해야 한다. 로컬에서만
+    공개하려면 allow_unauthenticated=True를 명시적으로 전달한다.
+    """
     config = _resolve_router_config(
         store,
         prefix,
@@ -337,10 +343,25 @@ def create_inspector_router(
         default_limit,
         max_limit,
     )
+    resolved_dependencies = normalize_inspector_dependencies(dependencies)
+    if not isinstance(allow_unauthenticated, bool):
+        raise ValueError("allow_unauthenticated must be a boolean")
+    if (
+        access_check is None
+        and not resolved_dependencies
+        and not allow_unauthenticated
+    ):
+        raise ValueError(
+            "access control must be configured, or explicitly allow "
+            "unauthenticated access for local use",
+        )
     router = APIRouter(
         prefix=config.path_prefix,
         tags=["Tailora Inspector"],
-        dependencies=_resolve_dependencies(dependencies, config.access_check),
+        dependencies=_resolve_dependencies(
+            resolved_dependencies,
+            config.access_check,
+        ),
         route_class=_NoStoreRoute,
     )
     _add_inspector_routes(router, store, config)

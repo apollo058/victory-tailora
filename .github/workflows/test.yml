@@ -58,7 +58,7 @@ jobs:
           cache: pip
       - name: Install browser test dependencies
         run: |
-          python -m pip install -e ".[dev,fastapi,sqlalchemy]"
+          python -m pip install -e ".[dev,fastapi,example]"
           python -m playwright install --with-deps chromium
       - name: Run browser tests
         run: python -m pytest -q tests/browser

@@ -64,6 +64,7 @@ def test_request_event_to_dict_uses_stable_json_fields():
                 "statement": "SELECT ...",
                 "fingerprint": "select users by id",
                 "database": "default",
+                "dialect": None,
                 "error": None,
             }
         ],
@@ -109,8 +110,8 @@ def test_request_event_from_dict_accepts_null_queries():
     assert restored.query_time_ms == 0.0
 
 
-def test_error_summary_is_serialized_as_a_safe_nested_object():
-    """오류 요약이 정해진 중첩 객체로 직렬화되는지 확인한다."""
+def test_error_summary_serialization_drops_message_and_stack_hint():
+    """직렬화 경계에서도 오류 문구와 경로 힌트를 버리는지 확인한다."""
     event = make_event()
     event.error = ErrorSummary(
         type="ValueError",
@@ -123,7 +124,7 @@ def test_error_summary_is_serialized_as_a_safe_nested_object():
 
     assert payload["error"] == {
         "type": "ValueError",
-        "message": "invalid value",
-        "stack_hint": "handlers.py:10",
+        "message": None,
+        "stack_hint": None,
     }
-    assert restored.error == event.error
+    assert restored.error == ErrorSummary(type="ValueError")

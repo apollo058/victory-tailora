@@ -183,7 +183,7 @@ def test_http_exception_captured_with_error_summary():
     assert event_404.status_code == 404
     assert event_404.error is not None
     assert event_404.error.type == "HTTPException"
-    assert event_404.error.message == "Item not found"
+    assert event_404.error.message is None
 
     response_418 = client.get("/teapot")
     assert response_418.status_code == 418
@@ -194,7 +194,7 @@ def test_http_exception_captured_with_error_summary():
     assert event_418.status_code == 418
     assert event_418.error is not None
     assert event_418.error.type == "HTTPException"
-    assert event_418.error.message == "I am a teapot"
+    assert event_418.error.message is None
 
 
 def test_http_exception_with_sensitive_detail_redacted():
@@ -210,13 +210,11 @@ def test_http_exception_with_sensitive_detail_redacted():
     event = store.list()[0]
     assert event.error is not None
     assert event.error.type == "HTTPException"
-    assert "super-secret-value" not in (event.error.message or "")
-    assert "abc123secret" not in (event.error.message or "")
-    assert "Invalid token provided" in (event.error.message or "")
+    assert event.error.message is None
 
 
-def test_split_error_response_body_is_summarized_after_all_chunks():
-    """여러 chunk로 나뉜 오류 JSON을 마지막에 합쳐 안전하게 요약한다."""
+def test_error_response_body_is_not_collected():
+    """분할 전송된 HTTP 오류 본문 원문을 수집하거나 저장하지 않는다."""
     app = FastAPI()
     store = RingBuffer()
 
@@ -239,9 +237,10 @@ def test_split_error_response_body_is_summarized_after_all_chunks():
     response = TestClient(app).get("/split-error")
 
     assert response.status_code == 400
+    assert response.json() == {"detail": "split error"}
     event = store.list()[0]
     assert event.error is not None
-    assert event.error.message == "split error"
+    assert event.error.message is None
 
 
 def test_unhandled_exception_captured_and_reraised():
@@ -260,7 +259,7 @@ def test_unhandled_exception_captured_and_reraised():
     assert event.status_code == 500
     assert event.error is not None
     assert event.error.type == "RuntimeError"
-    assert "Something went wrong" in (event.error.message or "")
+    assert event.error.message is None
 
 
 def test_excluded_paths_not_captured():
@@ -367,7 +366,7 @@ def test_http_exception_object_detail_is_safely_summarized():
         ),
     )
 
-    assert error.message == "HTTP Error Details"
+    assert error.message is None
     assert "super-secret" not in repr(error)
     assert "nested" not in repr(error)
 

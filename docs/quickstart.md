@@ -17,7 +17,7 @@ Tailora는 개발 중인 FastAPI 요청과 SQLAlchemy 쿼리를 같은 Swagger �
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[dev,fastapi]"
+python -m pip install -e ".[dev,fastapi,example]"
 python -m uvicorn examples.fastapi.app:app --reload
 ```
 
@@ -41,8 +41,8 @@ Windows PowerShell에서는 가상 환경 활성화 명령만 다음과 같이 �
 | `GET /slow` | `slow_request` signal |
 | `GET /slow-query` | `slow_query` signal |
 | `GET /secret-query` | SQL literal redaction |
-| `GET /secret-error?token=demo-secret` | 안전한 HTTP 오류 요약과 redaction |
-| `GET /db-error` | 500 응답과 실패 QueryEvent |
+| `GET /secret-error?token=demo-secret` | HTTP 오류 종류와 안전한 redaction |
+| `GET /db-error` | 500 응답과 문구를 뺀 실패 QueryEvent |
 
 `/docs`와 `/openapi.json`, `/__tailora/*` 내부 요청은 애플리케이션 진단
 event에 포함되지 않습니다.
@@ -68,16 +68,16 @@ enable_inspector(app, engine=engine, enabled=True)
 ```
 
 이후 호스트 앱의 docs URL을 열고 Inspector 탭을 선택하십시오. 공유 개발 환경에서는
-`access_check`를 설정하십시오. production에서는 `access_check`와 네트워크 제한을
-적용하고 `allow_in_production=True`를 함께 지정해야 합니다. `enabled=True`만으로
-인증이 추가되지는 않습니다.
+`access_check` 또는 인증 `dependencies`를 설정하십시오. production에서는 접근 제어와
+네트워크 제한을 적용하고 `allow_in_production=True`를 함께 지정해야 합니다.
+로컬 이외 환경에서는 접근 제어 설정 없이 Inspector를 켤 수 없습니다.
 
 ## 개발 설치와 pre-release 설치 구분
 
 저장소 예제를 수정하며 작업할 때는 editable install을 사용합니다.
 
 ```bash
-python -m pip install -e ".[dev,fastapi]"
+python -m pip install -e ".[dev,fastapi,example]"
 ```
 
 검증된 pre-release 후보를 설치할 때는 PyPI에서 별도로 설치합니다.
@@ -89,9 +89,10 @@ python -m pip install --pre "tailora[fastapi,sqlalchemy]==0.1.0rc1"
 ## 보안과 제한사항
 
 Tailora는 요청·응답 본문, SQL parameters, 인증 헤더와 쿠키 원문을 저장하지
-않습니다. SQL literal과 오류 요약도 저장·응답 직전에 마스킹합니다. Inspector는
-프로세스 내부 메모리 링버퍼이므로 장기 보관이나 운영 모니터링을 대신하지
-않습니다. 자세한 경계는 [보안 가이드](security.md)를 확인하십시오.
+않습니다. SQL literal은 저장·응답 직전에 마스킹하고, 오류 문구와 stack hint는
+보관하지 않습니다. Inspector는 프로세스 내부 메모리 링버퍼이므로 장기 보관이나
+운영 모니터링을 대신하지 않습니다. 자세한 경계는 [보안 가이드](security.md)를
+확인하십시오.
 
 ## 문제 보고와 릴리스 검증
 
@@ -102,7 +103,7 @@ GitHub issue로 문제를 보고하십시오. 취약점은 공개 issue에 비�
 릴리스 후보는 다음 검사를 통과한 뒤에만 배포 승인 대상으로 올립니다.
 
 ```bash
-python -m pip install -e ".[dev,fastapi,release]"
+python -m pip install -e ".[dev,fastapi,example,release]"
 python -m pytest -q
 ruff check .
 python -m build

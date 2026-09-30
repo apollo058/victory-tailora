@@ -126,16 +126,18 @@ def test_list_returns_latest_first_and_applies_limit():
     ]
 
 
-def test_internal_latest_view_returns_latest_events_for_read_only_analysis():
-    """읽기 전용 집계가 최신 이벤트 뷰를 최신순으로 받는지 확인한다."""
+def test_latest_view_returns_detached_latest_event_snapshots():
+    """최신 이벤트 스냅샷이 저장소 내부 자료와 분리되는지 확인한다."""
     store = RingBuffer(capacity=3)
     for index in range(1, 4):
         store.add(make_event(f"req-{index}"))
 
-    view = store._latest_view(limit=2)
+    view = store.latest_view(limit=2)
 
     assert isinstance(view, tuple)
     assert [event.request_id for event in view] == ["req-3", "req-2"]
+    view[0].route_template = "/changed"
+    assert store.get("req-3").route_template == "/users"
 
 
 @pytest.mark.parametrize("limit", [0, -1, True, "2"])

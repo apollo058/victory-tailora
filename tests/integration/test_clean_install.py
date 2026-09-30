@@ -92,7 +92,7 @@ def _install_wheel(wheel: Path, install_dir: Path, cwd: Path) -> None:
             "install",
             "--target",
             str(install_dir),
-            f"{wheel}[fastapi,sqlalchemy]",
+            f"{wheel}[fastapi,sqlalchemy,example]",
         ],
         check=True,
         cwd=cwd,

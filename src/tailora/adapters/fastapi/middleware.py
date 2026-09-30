@@ -2,7 +2,6 @@
 
 import dataclasses
 from datetime import datetime, timezone
-import json
 import logging
 import time
 from typing import Any, Callable, Coroutine
@@ -18,7 +17,7 @@ from tailora.core.context import (
 from tailora.core.enums import Framework
 from tailora.core.events import ErrorSummary, QueryEvent, RequestEvent
 from tailora.core.policies import RedactionPolicy
-from tailora.core.privacy import redact_error_summary, redact_event
+from tailora.core.privacy import redact_event
 from tailora.core.store import RingBuffer
 
 Scope = dict[str, Any]
@@ -27,7 +26,6 @@ Send = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
 ASGIApp = Callable[[Scope, Receive, Send], Coroutine[Any, Any, None]]
 
 DEFAULT_EXCLUDED_PATHS: tuple[str, ...] = ("/__tailora",)
-MAX_ERROR_BODY_BYTES = 16 * 1024
 _NO_STORE_HEADER = (b"cache-control", b"no-store")
 
 logger = logging.getLogger(__name__)
@@ -45,7 +43,6 @@ class _CaptureState:
     token: Any
     status_code: int = 500
     error_summary: ErrorSummary | None = None
-    error_body: bytearray = dataclasses.field(default_factory=bytearray)
 
 
 def _is_excluded_path(path: str, prefixes: tuple[str, ...]) -> bool:
@@ -72,67 +69,7 @@ def _extract_route_template(scope: Scope) -> str:
 
 def _summarize_exception(exc: Exception) -> ErrorSummary:
     """발생한 예외 객체에서 안전한 ErrorSummary를 만든다."""
-    if isinstance(exc, HTTPException):
-        detail = (
-            _extract_detail_message(exc.detail)
-            if exc.detail is not None
-            else None
-        )
-        return ErrorSummary(type=exc.__class__.__name__, message=detail)
-    message = str(exc) if str(exc) else None
-    return ErrorSummary(type=exc.__class__.__name__, message=message)
-
-
-def _extract_detail_message(detail: Any) -> str:
-    """에러 detail 객체에서 안전한 요약 문자열만 추출한다."""
-    if isinstance(detail, str):
-        return detail
-    if isinstance(detail, dict):
-        for key in ("msg", "message", "detail", "error"):
-            val = detail.get(key)
-            if isinstance(val, str) and val.strip():
-                return val.strip()
-        return "HTTP Error Details"
-    if isinstance(detail, list) and detail:
-        first = detail[0]
-        if isinstance(first, dict):
-            for key in ("msg", "message"):
-                val = first.get(key)
-                if isinstance(val, str) and val.strip():
-                    return val.strip()
-        return "Validation Error"
-    return "HTTP Error"
-
-
-def _extract_error_from_body(
-    body_bytes: bytes,
-    status_code: int,
-    policy: RedactionPolicy | None = None,
-) -> ErrorSummary | None:
-    """에러 응답 본문에서 요약 메시지를 추출하고 민감정보를 마스킹한다."""
-    if not body_bytes or status_code < 400:
-        return None
-    raw_message = f"HTTP {status_code}"
-    try:
-        data = json.loads(body_bytes.decode("utf-8", errors="ignore"))
-        if isinstance(data, dict) and "detail" in data:
-            raw_message = _extract_detail_message(data["detail"])
-    except Exception:
-        pass
-
-    err_type = "HTTPException" if status_code < 500 else "HTTPError"
-    raw_summary = ErrorSummary(type=err_type, message=raw_message)
-    return redact_error_summary(raw_summary, policy)
-
-
-def _append_error_body(state: _CaptureState, message: dict[str, Any]) -> None:
-    """오류 응답 본문을 제한된 크기까지 누적한다."""
-    body = message.get("body", b"")
-    if not isinstance(body, (bytes, bytearray, memoryview)):
-        return
-    remaining = MAX_ERROR_BODY_BYTES - len(state.error_body)
-    if remaining > 0:
-        state.error_body.extend(bytes(body)[:remaining])
+    return ErrorSummary(type=exc.__class__.__name__)
 
 
 def _add_no_store_header(message: dict[str, Any]) -> dict[str, Any]:
@@ -285,21 +222,17 @@ class TailoraMiddleware:
         )
 
     def _wrap_send(self, send: Send, state: _CaptureState) -> Send:
-        """응답 상태와 안전한 오류 요약만 측정하는 send wrapper를 만든다."""
+        """응답 상태 코드만 측정하고 본문은 건드리지 않는 wrapper를 만든다."""
         async def wrapped_send(message: dict[str, Any]) -> None:
-            """응답 상태 코드와 에러 메시지를 가로채고 원래 send를 호출한다."""
+            """응답 상태 코드를 확인한 뒤 원래 ASGI 응답을 보낸다."""
             msg_type = message.get("type")
             if msg_type == "http.response.start":
                 state.status_code = int(message.get("status", 200))
-            elif msg_type == "http.response.body" and state.status_code >= 400:
-                if state.error_summary is None:
-                    _append_error_body(state, message)
-                    if not message.get("more_body", False):
-                        state.error_summary = _extract_error_from_body(
-                            bytes(state.error_body),
-                            state.status_code,
-                            self.policy,
-                        )
+                if state.status_code >= 400 and state.error_summary is None:
+                    error_type = (
+                        "HTTPException" if state.status_code < 500 else "HTTPError"
+                    )
+                    state.error_summary = ErrorSummary(type=error_type)
             await send(message)
         return wrapped_send
 

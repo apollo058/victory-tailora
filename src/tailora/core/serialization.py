@@ -5,6 +5,7 @@ import json
 from typing import Any, Mapping
 
 from tailora.core.events import ErrorSummary, QueryEvent, RequestEvent
+from tailora.core.privacy import redact_error_summary
 
 
 def _format_datetime(value: datetime) -> str:
@@ -30,13 +31,14 @@ def _required(data: Mapping[str, Any], field_name: str) -> Any:
 
 
 def _error_to_dict(error: ErrorSummary | None) -> dict[str, str | None] | None:
-    """오류 요약을 JSON용 사전으로 바꾼다."""
-    if error is None:
+    """오류 요약의 원문을 제거한 뒤 JSON용 사전으로 바꾼다."""
+    safe_error = redact_error_summary(error)
+    if safe_error is None:
         return None
     return {
-        "type": error.type,
-        "message": error.message,
-        "stack_hint": error.stack_hint,
+        "type": safe_error.type,
+        "message": safe_error.message,
+        "stack_hint": safe_error.stack_hint,
     }
 
 
@@ -65,6 +67,7 @@ def query_event_to_dict(event: QueryEvent) -> dict[str, Any]:
         "statement": event.statement,
         "fingerprint": event.fingerprint,
         "database": event.database,
+        "dialect": event.dialect,
         "error": _error_to_dict(event.error),
     }
 
@@ -82,6 +85,7 @@ def query_event_from_dict(data: Mapping[str, Any]) -> QueryEvent:
         fingerprint=data.get("fingerprint"),
         database=data.get("database"),
         error=_error_from_value(data.get("error")),
+        dialect=data.get("dialect"),
     )
 
 

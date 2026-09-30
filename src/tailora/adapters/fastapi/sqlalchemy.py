@@ -21,16 +21,21 @@ _REGISTERED_ENGINES: weakref.WeakKeyDictionary[
 _REGISTRATION_LOCK = RLock()
 
 
-def _extract_database_name(engine: Any, override_name: str | None) -> str:
-    """연결 정보에서 비밀번호를 제외한 안전한 데이터베이스 이름을 추출한다."""
-    if override_name is not None and override_name.strip():
-        return override_name.strip()
+def _extract_dialect_name(engine: Any) -> str | None:
+    """SQLAlchemy Engine에서 SQL 문법 방언 이름을 가져온다."""
     try:
         if hasattr(engine, "dialect") and hasattr(engine.dialect, "name"):
             return str(engine.dialect.name)
     except Exception:
         pass
-    return "database"
+    return None
+
+
+def _extract_database_name(engine: Any, override_name: str | None) -> str:
+    """연결 정보에서 사용자 지정 이름 또는 DB 방언 이름을 가져온다."""
+    if override_name is not None and override_name.strip():
+        return override_name.strip()
+    return _extract_dialect_name(engine) or "database"
 
 
 def _create_query_event(
@@ -40,10 +45,11 @@ def _create_query_event(
     statement: str | None,
     database: str,
     error: ErrorSummary | None = None,
+    dialect: str | None = None,
 ) -> QueryEvent:
     """정규화된 쿼리 정보로 QueryEvent 객체를 만든다."""
-    safe_stmt = redact_sql_statement(statement)
-    fingerprint = make_sql_fingerprint(statement)
+    safe_stmt = redact_sql_statement(statement, dialect=dialect)
+    fingerprint = make_sql_fingerprint(statement, dialect=dialect)
     query_id = str(uuid.uuid4())
     return QueryEvent(
         query_id=query_id,
@@ -54,6 +60,7 @@ def _create_query_event(
         fingerprint=fingerprint,
         database=database,
         error=error,
+        dialect=dialect,
     )
 
 
@@ -91,6 +98,7 @@ def _on_after_cursor_execute(
     context: Any,
     executemany: bool,
     database_name: str,
+    dialect: str | None,
 ) -> None:
     """쿼리 실행 완료 시 실행 시간을 측정하고 QueryEvent를 현재 컨텍스트에 추가한다."""
     try:
@@ -118,6 +126,7 @@ def _on_after_cursor_execute(
             statement=original_stmt,
             database=database_name,
             error=None,
+            dialect=dialect,
         )
         record_query(query_event)
     except Exception:
@@ -128,6 +137,7 @@ def _on_after_cursor_execute(
 def _on_handle_error(
     exception_context: Any,
     database_name: str,
+    dialect: str | None,
 ) -> None:
     """쿼리 실패 시 ErrorSummary가 포함된 QueryEvent를 기록한다."""
     try:
@@ -150,9 +160,8 @@ def _on_handle_error(
         ctx = get_current_context()
         if ctx is not None:
             exc = getattr(exception_context, "original_exception", None)
-            error_msg = str(exc) if exc else None
             err_type = exc.__class__.__name__ if exc else "DatabaseError"
-            error_summary = ErrorSummary(type=err_type, message=error_msg)
+            error_summary = ErrorSummary(type=err_type)
 
             sequence = ctx.total_query_count + 1
             query_event = _create_query_event(
@@ -162,11 +171,63 @@ def _on_handle_error(
                 statement=original_stmt,
                 database=database_name,
                 error=error_summary,
+                dialect=dialect,
             )
             record_query(query_event)
     except Exception:
         # 오류 수집 실패가 원래 DB 예외 전달을 방해하지 않는다.
         pass
+
+
+def _create_event_listeners(
+    database_name: str,
+    dialect: str | None,
+) -> dict[str, Any]:
+    """SQLAlchemy 커서 실행과 오류 처리를 위한 listener를 만든다."""
+    def before_exec(conn, cursor, statement, parameters, context, executemany):
+        """커서 실행 전 훅."""
+        _on_before_cursor_execute(
+            conn, cursor, statement, parameters, context, executemany
+        )
+
+    def after_exec(conn, cursor, statement, parameters, context, executemany):
+        """커서 실행 후 훅."""
+        _on_after_cursor_execute(
+            conn,
+            cursor,
+            statement,
+            parameters,
+            context,
+            executemany,
+            database_name,
+            dialect,
+        )
+
+    def on_error(exception_context):
+        """에러 발생 훅."""
+        _on_handle_error(exception_context, database_name, dialect)
+
+    return {
+        "before_cursor_execute": before_exec,
+        "after_cursor_execute": after_exec,
+        "handle_error": on_error,
+    }
+
+
+def _attach_event_listeners(engine: Engine, listeners: dict[str, Any]) -> None:
+    """listener 등록을 시도하고 중간 실패 시 등록분을 되돌린다."""
+    registered: list[tuple[str, Any]] = []
+    try:
+        for event_name, listener in listeners.items():
+            event.listen(engine, event_name, listener)
+            registered.append((event_name, listener))
+    except Exception:
+        for event_name, listener in reversed(registered):
+            try:
+                event.remove(engine, event_name, listener)
+            except Exception:
+                pass
+        raise
 
 
 def register_sqlalchemy_inspector(
@@ -182,41 +243,9 @@ def register_sqlalchemy_inspector(
             return
 
         db_name = _extract_database_name(engine, database_name)
-
-        def before_exec(conn, cursor, statement, parameters, context, executemany):
-            """커서 실행 전 훅."""
-            _on_before_cursor_execute(
-                conn, cursor, statement, parameters, context, executemany
-            )
-
-        def after_exec(conn, cursor, statement, parameters, context, executemany):
-            """커서 실행 후 훅."""
-            _on_after_cursor_execute(
-                conn, cursor, statement, parameters, context, executemany, db_name
-            )
-
-        def on_error(exception_context):
-            """에러 발생 훅."""
-            _on_handle_error(exception_context, db_name)
-
-        listeners = {
-            "before_cursor_execute": before_exec,
-            "after_cursor_execute": after_exec,
-            "handle_error": on_error,
-        }
-        registered: list[tuple[str, Any]] = []
-        try:
-            for event_name, listener in listeners.items():
-                event.listen(engine, event_name, listener)
-                registered.append((event_name, listener))
-        except Exception:
-            for event_name, listener in reversed(registered):
-                try:
-                    event.remove(engine, event_name, listener)
-                except Exception:
-                    pass
-            raise
-
+        dialect = _extract_dialect_name(engine)
+        listeners = _create_event_listeners(db_name, dialect)
+        _attach_event_listeners(engine, listeners)
         _REGISTERED_ENGINES[engine] = listeners
 
 
