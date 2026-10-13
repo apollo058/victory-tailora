@@ -49,7 +49,7 @@ def _create_query_event(
 ) -> QueryEvent:
     """정규화된 쿼리 정보로 QueryEvent 객체를 만든다."""
     safe_stmt = redact_sql_statement(statement, dialect=dialect)
-    fingerprint = make_sql_fingerprint(statement, dialect=dialect)
+    fingerprint = make_sql_fingerprint(safe_stmt, dialect=dialect)
     query_id = str(uuid.uuid4())
     return QueryEvent(
         query_id=query_id,
@@ -79,7 +79,6 @@ def _on_before_cursor_execute(
         state = (
             datetime.now(timezone.utc),
             time.perf_counter(),
-            statement,
         )
         if context is not None:
             setattr(context, _STATE_KEY, state)
@@ -105,13 +104,14 @@ def _on_after_cursor_execute(
         state = None
         if context is not None and hasattr(context, _STATE_KEY):
             state = getattr(context, _STATE_KEY, None)
+            delattr(context, _STATE_KEY)
         elif hasattr(conn, "info"):
             state = conn.info.pop(_STATE_KEY, None)
 
         if state is None:
             return
 
-        started_at, start_perf, original_stmt = state
+        started_at, start_perf = state
         duration_ms = round((time.perf_counter() - start_perf) * 1000.0, 6)
 
         ctx = get_current_context()
@@ -123,7 +123,7 @@ def _on_after_cursor_execute(
             sequence=sequence,
             started_at=started_at,
             duration_ms=duration_ms,
-            statement=original_stmt,
+            statement=(statement if _can_capture_statement(ctx) else None),
             database=database_name,
             error=None,
             dialect=dialect,
@@ -146,16 +146,16 @@ def _on_handle_error(
         state = None
         if exec_ctx is not None and hasattr(exec_ctx, _STATE_KEY):
             state = getattr(exec_ctx, _STATE_KEY, None)
+            delattr(exec_ctx, _STATE_KEY)
         elif conn and hasattr(conn, "info"):
             state = conn.info.pop(_STATE_KEY, None)
 
         if state is not None:
-            started_at, start_perf, original_stmt = state
+            started_at, start_perf = state
             duration_ms = round((time.perf_counter() - start_perf) * 1000.0, 6)
         else:
             started_at = datetime.now(timezone.utc)
             duration_ms = 0.0
-            original_stmt = getattr(exception_context, "statement", None)
 
         ctx = get_current_context()
         if ctx is not None:
@@ -168,7 +168,11 @@ def _on_handle_error(
                 sequence=sequence,
                 started_at=started_at,
                 duration_ms=duration_ms,
-                statement=original_stmt,
+                statement=(
+                    getattr(exception_context, "statement", None)
+                    if _can_capture_statement(ctx)
+                    else None
+                ),
                 database=database_name,
                 error=error_summary,
                 dialect=dialect,
@@ -179,11 +183,18 @@ def _on_handle_error(
         pass
 
 
+def _can_capture_statement(ctx: Any) -> bool:
+    """요청의 보관 한도를 넘은 쿼리는 SQL 처리 없이 실행 지표만 측정한다."""
+    limit = ctx.max_queries_per_request
+    return limit is None or len(ctx.queries) < limit
+
+
 def _create_event_listeners(
     database_name: str,
     dialect: str | None,
 ) -> dict[str, Any]:
     """SQLAlchemy 커서 실행과 오류 처리를 위한 listener를 만든다."""
+
     def before_exec(conn, cursor, statement, parameters, context, executemany):
         """커서 실행 전 훅."""
         _on_before_cursor_execute(

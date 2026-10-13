@@ -16,7 +16,10 @@ FastAPI의 기존 Swagger UI에는 Inspector 탭이 추가되며, API Docs와 Tr
 상태를 유지한 채 같은 docs URL 안에서 Inspector를 사용할 수 있습니다.
 
 기본값은 비활성이며 `enabled=True`를 명시해야 수집기·API·Swagger
-plugin이 함께 켜집니다. production 활성화는 별도 확인을 요구하고,
+plugin이 함께 켜집니다. 환경 기본값은 `unspecified`이며 환경을 생략한 활성화는
+접근 제어를 요구합니다. 인증 없는 로컬 사용은 `environment="development"`를
+명시하고 loopback 주소와 localhost Host로 접속해야 합니다.
+production 활성화는 별도 확인을 요구하고,
 동기·비동기 접근 hook과 저장·응답 한도를 설정할 수 있습니다.
 FastAPI 예제, quickstart 문서, wheel·sdist metadata와 격리된 설치 검증, 첫
 pre-release 후보(`0.1.0rc1`)를 준비했습니다. 실제 PyPI 업로드는
@@ -29,6 +32,7 @@ Create a virtual environment and install the package with development and exampl
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade "pip>=26.2.1"
 python -m pip install -e ".[dev,fastapi,example]"
 ```
 
@@ -51,9 +55,9 @@ complete copy-and-run path is in the [quickstart guide](docs/quickstart.md).
 
 ## Swagger UI 호환성
 
-Tailora는 Swagger UI `5.17.14`의 공식 plugin과 custom layout 확장 지점을
+Tailora는 Swagger UI `5.33.2`의 공식 plugin과 custom layout 확장 지점을
 지원합니다. core 자산은 고정 버전과 SRI로 검증하며, CDN 연결에 실패하면 안전한
-안내를 표시합니다. `enable_inspector(app, enabled=True)`를 호출하면
+안내를 표시합니다. `enable_inspector(app, enabled=True, environment="development")`를 호출하면
 FastAPI가 만든 기본 Swagger docs route에 Inspector 탭을 추가합니다. Swagger UI
 core를 복사하거나 수정하지 않으며, custom docs URL과 `root_path`도 지원합니다.
 
@@ -65,7 +69,7 @@ Inspector는 요청하기 전까지 비활성 상태입니다. 로컬 개발 환
 ```python
 from tailora.adapters.fastapi import enable_inspector
 
-enable_inspector(app, enabled=True)
+enable_inspector(app, enabled=True, environment="development")
 ```
 
 공유 개발 환경에서는 요청마다 실행되는 접근 hook을 설정하십시오. hook은
@@ -85,7 +89,8 @@ enable_inspector(
 )
 ```
 
-production에서는 `enabled=True`와 `allow_in_production=True`를 모두 지정해야
+production에서는 `environment="production"`, `enabled=True`와
+`allow_in_production=True`를 모두 지정해야
 합니다. 이 설정은 인증이나 네트워크 보호를 대신하지 않으므로, production에서
 사용하려면 `access_check` 또는 인증 dependency와 방화벽·사내망 제한을 함께
 적용하십시오. 자세한 보안 경계는 [보안 가이드](docs/security.md)에 정리되어
@@ -169,7 +174,7 @@ pip install "tailora[fastapi]"
 ```python
 from tailora.adapters.fastapi import enable_inspector
 
-enable_inspector(app, enabled=True)
+enable_inspector(app, enabled=True, environment="development")
 ```
 
 Then the developer opens the host application's configured Swagger page and selects the Inspector tab. The UI is served as part of the Swagger UI integration; it is not a separate frontend application.
@@ -197,6 +202,7 @@ Then the developer opens the host application's configured Swagger page and sele
 ## Documentation
 
 - [Product idea and open questions](docs/idea.md)
+- [Security audit and remaining release checks](docs/security-audit.md)
 - [Architecture proposal](docs/architecture.md)
 - [Roadmap](docs/roadmap.md)
 - [Quickstart and release checks](docs/quickstart.md)

@@ -9,12 +9,7 @@ import pytest
 
 def load_example_module():
     """저장소의 FastAPI 예제 모듈을 파일 경로로 불러온다."""
-    app_path = (
-        Path(__file__).resolve().parents[2]
-        / "examples"
-        / "fastapi"
-        / "app.py"
-    )
+    app_path = Path(__file__).resolve().parents[2] / "examples" / "fastapi" / "app.py"
     spec = spec_from_file_location("tailora_fastapi_example", app_path)
 
     if spec is None or spec.loader is None:
@@ -28,7 +23,9 @@ def load_example_module():
 def test_health_endpoint_returns_ok_and_records_event():
     """헬스체크 엔드포인트가 정상 응답하고 이벤트를 기록하는지 확인한다."""
     module = load_example_module()
-    client = TestClient(module.app)
+    client = TestClient(
+        module.app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+    )
 
     response = client.get("/health")
 
@@ -46,7 +43,9 @@ def test_health_endpoint_returns_ok_and_records_event():
 def test_user_endpoint_executes_query_and_records_event():
     """사용자 조회 시 SQL 쿼리가 실행되고 이벤트에 쿼리가 연결되는지 확인한다."""
     module = load_example_module()
-    client = TestClient(module.app)
+    client = TestClient(
+        module.app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+    )
 
     response = client.get("/users/1")
 
@@ -65,7 +64,9 @@ def test_user_endpoint_executes_query_and_records_event():
 def test_repeat_user_endpoint_records_duplicate_queries():
     """반복 조회 endpoint가 동일 fingerprint를 두 번 기록하는지 확인한다."""
     module = load_example_module()
-    client = TestClient(module.app)
+    client = TestClient(
+        module.app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+    )
 
     response = client.get("/users/repeat/1")
 
@@ -84,7 +85,9 @@ def test_repeat_user_endpoint_records_duplicate_queries():
 def test_slow_request_exposes_slow_request_signal():
     """느린 요청 endpoint가 설정된 threshold를 넘는 신호를 남기는지 확인한다."""
     module = load_example_module()
-    client = TestClient(module.app)
+    client = TestClient(
+        module.app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+    )
 
     response = client.get("/slow")
 
@@ -99,7 +102,9 @@ def test_slow_request_exposes_slow_request_signal():
 def test_slow_query_exposes_slow_query_signal_without_storing_parameters():
     """느린 SQL 함수가 측정되고 실행 인자는 저장되지 않는지 확인한다."""
     module = load_example_module()
-    client = TestClient(module.app)
+    client = TestClient(
+        module.app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+    )
 
     response = client.get("/slow-query")
 
@@ -116,7 +121,9 @@ def test_slow_query_exposes_slow_query_signal_without_storing_parameters():
 def test_secret_query_redacts_sql_literal_before_storage():
     """SQL literal을 실행해도 응답과 Inspector 이벤트에 원문이 남지 않는지 확인한다."""
     module = load_example_module()
-    client = TestClient(module.app)
+    client = TestClient(
+        module.app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+    )
 
     response = client.get("/secret-query")
 
@@ -131,7 +138,9 @@ def test_secret_query_redacts_sql_literal_before_storage():
 def test_http_error_preserves_response_and_redacts_secret_detail():
     """HTTP 오류 응답을 유지하면서 저장 이벤트의 비밀값을 가리는지 확인한다."""
     module = load_example_module()
-    client = TestClient(module.app)
+    client = TestClient(
+        module.app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+    )
 
     response = client.get("/secret-error?token=demo-secret")
 
@@ -146,7 +155,12 @@ def test_http_error_preserves_response_and_redacts_secret_detail():
 def test_database_error_preserves_500_response_and_failed_query():
     """DB 오류가 500 응답으로 전달되고 실패 쿼리가 안전하게 기록되는지 확인한다."""
     module = load_example_module()
-    client = TestClient(module.app, raise_server_exceptions=False)
+    client = TestClient(
+        module.app,
+        raise_server_exceptions=False,
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 50000),
+    )
 
     response = client.get("/db-error")
 
@@ -162,7 +176,9 @@ def test_database_error_preserves_500_response_and_failed_query():
 def test_example_internal_routes_are_not_captured(path: str):
     """예제의 문서와 Inspector 내부 요청이 진단 이벤트를 오염시키지 않는지 확인한다."""
     module = load_example_module()
-    client = TestClient(module.app)
+    client = TestClient(
+        module.app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+    )
 
     response = client.get(path)
 

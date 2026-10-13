@@ -61,6 +61,7 @@ def create_signals_app(
         store=store,
         threshold_policy=threshold_policy,
         enabled=True,
+        environment="development",
     )
     return app, resolved_store
 
@@ -75,7 +76,7 @@ def test_requests_list_includes_signals_summary():
     store.add(req)
 
     app, _ = create_signals_app(store=store)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/__tailora/requests")
     assert response.status_code == 200
@@ -100,7 +101,7 @@ def test_request_detail_includes_signals_detail():
     store.add(req)
 
     app, _ = create_signals_app(store=store)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/__tailora/requests/req-detail")
     assert response.status_code == 200
@@ -121,7 +122,7 @@ def test_request_detail_includes_signals_detail():
 def test_aggregates_includes_threshold_metadata():
     """집계 엔드포인트 응답에 임계값 메타데이터가 포함되는지 확인한다."""
     app, _ = create_signals_app()
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/__tailora/aggregates")
     assert response.status_code == 200
@@ -151,7 +152,7 @@ def test_custom_threshold_policy_applied_to_api():
         store=store,
         threshold_policy=custom_policy,
     )
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/__tailora/requests")
     assert response.status_code == 200

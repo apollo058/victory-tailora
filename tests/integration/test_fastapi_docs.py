@@ -12,7 +12,7 @@ def create_docs_app(
 ) -> tuple[FastAPI, TestClient]:
     """Swagger UI 설정을 가진 테스트용 FastAPI 앱과 클라이언트를 생성한다."""
     app = FastAPI(docs_url=docs_url, openapi_url=openapi_url)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
     return app, client
 
 
@@ -20,7 +20,7 @@ def test_enabled_inspector_adds_plugin_to_existing_docs_page():
     """Inspector 활성화 시 기존 docs URL에 plugin이 포함되는지 확인한다."""
     app, client = create_docs_app()
 
-    enable_inspector(app, enabled=True)
+    enable_inspector(app, enabled=True, environment="development")
 
     response = client.get("/docs")
 
@@ -28,7 +28,7 @@ def test_enabled_inspector_adds_plugin_to_existing_docs_page():
     assert "TailoraSwaggerPlugin" in response.text
     assert "/__tailora/swagger-plugin.js" in response.text
     assert "/__tailora/swagger-plugin.css" in response.text
-    assert "swagger-ui-dist@5.17.14" in response.text
+    assert "swagger-ui-dist@5.33.2" in response.text
     assert response.headers["cache-control"] == "no-store"
 
 
@@ -36,7 +36,7 @@ def test_plugin_assets_are_served_from_the_inspector_prefix():
     """Swagger plugin JavaScript와 CSS가 Inspector prefix에서 제공되는지 확인한다."""
     app, client = create_docs_app()
 
-    enable_inspector(app, enabled=True)
+    enable_inspector(app, enabled=True, environment="development")
 
     plugin_response = client.get("/__tailora/swagger-plugin.js")
     stylesheet_response = client.get("/__tailora/swagger-plugin.css")
@@ -54,7 +54,9 @@ def test_custom_inspector_prefix_is_passed_to_docs_plugin():
     """사용자 지정 Inspector prefix가 docs plugin 설정에 반영되는지 확인한다."""
     app, client = create_docs_app()
 
-    enable_inspector(app, prefix="/diagnostics", enabled=True)
+    enable_inspector(
+        app, prefix="/diagnostics", enabled=True, environment="development"
+    )
 
     response = client.get("/docs")
 
@@ -67,9 +69,11 @@ def test_custom_inspector_prefix_is_passed_to_docs_plugin():
 def test_custom_docs_url_and_root_path_are_reflected_in_asset_urls():
     """custom docs URL과 proxy root path에서도 plugin 자산 URL이 맞는지 확인한다."""
     app = FastAPI(docs_url="/developer/docs", root_path="/gateway")
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
-    enable_inspector(app, prefix="/diagnostics", enabled=True)
+    enable_inspector(
+        app, prefix="/diagnostics", enabled=True, environment="development"
+    )
 
     response = client.get("/developer/docs")
 
@@ -82,7 +86,7 @@ def test_custom_docs_url_and_root_path_are_reflected_in_asset_urls():
 def test_docs_related_requests_are_not_collected():
     """docs, OpenAPI와 plugin 자산 요청이 이벤트 저장소를 오염시키지 않는지 확인한다."""
     app, client = create_docs_app()
-    store = enable_inspector(app, enabled=True)
+    store = enable_inspector(app, enabled=True, environment="development")
 
     client.get("/docs")
     client.get("/openapi.json")

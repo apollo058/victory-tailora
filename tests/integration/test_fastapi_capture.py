@@ -31,6 +31,7 @@ def make_query(sequence: int = 1, statement: str = "SELECT 1") -> QueryEvent:
 
 def _register_success_routes(app: FastAPI) -> None:
     """정상 응답과 쿼리 수집을 검증할 라우트를 등록한다."""
+
     @app.get("/health")
     def health_check() -> dict[str, str]:
         """정상 동작 확인용 헬스체크 엔드포인트."""
@@ -45,6 +46,7 @@ def _register_success_routes(app: FastAPI) -> None:
 
 def _register_error_routes(app: FastAPI) -> None:
     """HTTP 및 서버 오류 수집을 검증할 라우트를 등록한다."""
+
     @app.get("/not-found")
     def not_found_route() -> None:
         """404 HTTPException을 발생하는 엔드포인트."""
@@ -75,6 +77,7 @@ def _register_error_routes(app: FastAPI) -> None:
 
 def _register_internal_routes(app: FastAPI) -> None:
     """쿼리 보정과 Inspector 제외 경로를 검증할 라우트를 등록한다."""
+
     @app.get("/broken-query-sequence")
     def broken_query_route() -> dict[str, str]:
         """순서가 잘못된 쿼리를 강제로 기록하는 엔드포인트."""
@@ -118,7 +121,7 @@ def test_default_middleware_is_disabled():
 
     store = RingBuffer()
     app.add_middleware(TailoraMiddleware, store=store)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/ping")
 
@@ -130,7 +133,7 @@ def test_successful_request_captured():
     """정상 요청이 링버퍼에 RequestEvent로 저장되는지 확인한다."""
     store = RingBuffer()
     app = create_test_app(store=store, enabled=True)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/health")
 
@@ -153,7 +156,7 @@ def test_route_template_and_queries_captured():
     """경로 매개변수가 포함된 템플릿과 쿼리가 함께 저장되는지 확인한다."""
     store = RingBuffer()
     app = create_test_app(store=store, enabled=True)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/users/42")
 
@@ -172,7 +175,7 @@ def test_http_exception_captured_with_error_summary():
     """HTTPException 발생 시 상태 코드와 에러 요약이 저장되는지 확인한다."""
     store = RingBuffer()
     app = create_test_app(store=store, enabled=True)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response_404 = client.get("/not-found")
     assert response_404.status_code == 404
@@ -201,7 +204,7 @@ def test_http_exception_with_sensitive_detail_redacted():
     """HTTP 에러 detail에 포함된 민감정보가 안전하게 마스킹되는지 확인한다."""
     store = RingBuffer()
     app = create_test_app(store=store, enabled=True)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/secret-error")
     assert response.status_code == 400
@@ -234,7 +237,9 @@ def test_error_response_body_is_not_collected():
         store=store,
         enabled=True,
     )
-    response = TestClient(app).get("/split-error")
+    response = TestClient(
+        app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+    ).get("/split-error")
 
     assert response.status_code == 400
     assert response.json() == {"detail": "split error"}
@@ -247,7 +252,12 @@ def test_unhandled_exception_captured_and_reraised():
     """처리되지 않은 예외 발생 시 500으로 기록되고 에러 요약이 저장되는지 확인한다."""
     store = RingBuffer()
     app = create_test_app(store=store, enabled=True)
-    client = TestClient(app, raise_server_exceptions=False)
+    client = TestClient(
+        app,
+        raise_server_exceptions=False,
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 50000),
+    )
 
     response = client.get("/crash")
 
@@ -266,7 +276,7 @@ def test_excluded_paths_not_captured():
     """제외 경로(/__tailora) 요청은 링버퍼에 저장되지 않는지 확인한다."""
     store = RingBuffer()
     app = create_test_app(store=store, enabled=True)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/__tailora/health")
 
@@ -283,7 +293,12 @@ def test_unmatched_path_does_not_store_raw_path_as_route_template():
         store=store,
         enabled=True,
     )
-    client = TestClient(app, raise_server_exceptions=False)
+    client = TestClient(
+        app,
+        raise_server_exceptions=False,
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 50000),
+    )
     secret = "reset-token=super-secret-value"
 
     response = client.get(f"/missing/{secret}")
@@ -298,7 +313,7 @@ def test_disabled_middleware_does_not_capture():
     """미들웨어가 비활성화되었을 때 요청이 저장되지 않는지 확인한다."""
     store = RingBuffer()
     app = create_test_app(store=store, enabled=False)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/health")
 
@@ -317,7 +332,7 @@ def test_collector_error_does_not_break_api_response(caplog):
             raise RuntimeError("Storage failure token=super-secret")
 
     app = create_test_app(store=BrokenStore(), enabled=True)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/health")
 
@@ -346,7 +361,9 @@ def test_query_limit_is_applied_during_request_capture():
             record_query(make_query(index))
         return {"ok": True}
 
-    response = TestClient(app).get("/many-queries")
+    response = TestClient(
+        app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+    ).get("/many-queries")
 
     assert response.status_code == 200
     event = store.list()[0]
@@ -394,7 +411,7 @@ def test_excluded_path_matching_uses_a_path_segment_boundary():
 
     store = RingBuffer()
     app.add_middleware(TailoraMiddleware, store=store, enabled=True)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     assert client.get("/__tailorax/health").status_code == 200
     assert store.size() == 1
@@ -404,7 +421,7 @@ def test_broken_query_sequence_normalized_or_handled():
     """쿼리 시퀀스가 어긋나도 API 응답이 성공하고 안전하게 기록되는지 확인한다."""
     store = RingBuffer()
     app = create_test_app(store=store, enabled=True)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/broken-query-sequence")
 

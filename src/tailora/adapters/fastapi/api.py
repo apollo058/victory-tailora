@@ -11,6 +11,7 @@ from fastapi.routing import APIRoute
 
 from tailora.adapters.fastapi.security import (
     create_inspector_access_dependency,
+    is_local_inspector_request,
     normalize_inspector_dependencies,
 )
 from tailora.config import AccessCheck, InspectorConfig
@@ -26,6 +27,17 @@ from tailora.core.serialization import request_event_to_dict
 from tailora.core.store import RingBuffer
 
 _NO_STORE_HEADERS = {"Cache-Control": "no-store"}
+_INSPECTOR_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "Referrer-Policy": "same-origin",
+    "Content-Security-Policy": (
+        "default-src 'none'; script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; connect-src 'self'; "
+        "img-src 'self' data:; frame-ancestors 'self'; "
+        "base-uri 'none'; form-action 'none'; object-src 'none'"
+    ),
+}
 
 
 class _NoStoreRoute(APIRoute):
@@ -75,9 +87,7 @@ def _analysis_scope(events: list[RequestEvent]) -> dict[str, Any]:
         "request_count": len(events),
         "analyzed_query_count": sum(event.query_count for event in events),
         "total_query_count": sum(event.total_query_count for event in events),
-        "is_queries_truncated": any(
-            event.is_queries_truncated for event in events
-        ),
+        "is_queries_truncated": any(event.is_queries_truncated for event in events),
     }
 
 
@@ -127,6 +137,8 @@ def _resolve_dependencies(
 def _set_no_store_header(response: Response) -> None:
     """Inspector 데이터 응답이 캐시되지 않도록 응답 헤더를 설정한다."""
     response.headers["Cache-Control"] = "no-store"
+    for name, value in _INSPECTOR_SECURITY_HEADERS.items():
+        response.headers[name] = value
 
 
 def _add_health_route(router: APIRouter, store: RingBuffer) -> None:
@@ -306,13 +318,9 @@ def _resolve_router_config(
         store_capacity=store.capacity,
         api_default_limit=default_limit,
         api_max_limit=max_limit,
-        redaction_policy=(
-            policy if policy is not None else RedactionPolicy()
-        ),
+        redaction_policy=(policy if policy is not None else RedactionPolicy()),
         threshold_policy=(
-            threshold_policy
-            if threshold_policy is not None
-            else ThresholdPolicy()
+            threshold_policy if threshold_policy is not None else ThresholdPolicy()
         ),
         access_check=access_check,
     )
@@ -346,11 +354,7 @@ def create_inspector_router(
     resolved_dependencies = normalize_inspector_dependencies(dependencies)
     if not isinstance(allow_unauthenticated, bool):
         raise ValueError("allow_unauthenticated must be a boolean")
-    if (
-        access_check is None
-        and not resolved_dependencies
-        and not allow_unauthenticated
-    ):
+    if access_check is None and not resolved_dependencies and not allow_unauthenticated:
         raise ValueError(
             "access control must be configured, or explicitly allow "
             "unauthenticated access for local use",
@@ -360,7 +364,11 @@ def create_inspector_router(
         tags=["Tailora Inspector"],
         dependencies=_resolve_dependencies(
             resolved_dependencies,
-            config.access_check,
+            (
+                config.access_check
+                if config.access_check is not None or resolved_dependencies
+                else is_local_inspector_request
+            ),
         ),
         route_class=_NoStoreRoute,
     )

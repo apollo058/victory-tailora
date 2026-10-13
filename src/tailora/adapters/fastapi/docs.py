@@ -9,12 +9,12 @@ from fastapi.responses import HTMLResponse
 from tailora.adapters.fastapi.security import is_inspector_access_allowed
 from tailora.config import AccessCheck
 
-SUPPORTED_SWAGGER_UI_VERSION = "5.17.14"
+SUPPORTED_SWAGGER_UI_VERSION = "5.33.2"
 _SWAGGER_UI_CSS_INTEGRITY = (
-    "sha384-wxLW6kwyHktdDGr6Pv1zgm/VGJh99lfUbzSn6HNHBENZlCN7W602k9VkGdxuFvPn"
+    "sha384-Ov4/wv3j2bmct8cDc5X4ngJZohVPzEmc6uDPH8WeljUxO5vtoykvMEfbu9Vh6RaW"
 )
 _SWAGGER_UI_JS_INTEGRITY = (
-    "sha384-wmyclcVGX/WhUkdkATwhaK1X1JtiNrr2EoYJ+diV3vj4v6OC5yCeSu+yW13SYJep"
+    "sha384-gNnUp++d7WqR9OKX4OMoUmV2w0JxEs1uu6NPXgcynGClIX5DOu6ol4Lp+lINyZcJ"
 )
 _DEFAULT_DOCS_ROUTE_NAME = "swagger_ui_html"
 _TAILORA_DOCS_ROUTE_NAME = "tailora_swagger_ui_html"
@@ -83,7 +83,15 @@ def _create_docs_endpoint(
         )
         return HTMLResponse(
             content=content,
-            headers={"Cache-Control": "no-store"},
+            headers={
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "SAMEORIGIN",
+                "Referrer-Policy": "same-origin",
+                "Content-Security-Policy": (
+                    "frame-ancestors 'self'; base-uri 'self'; object-src 'none'"
+                ),
+            },
         )
 
     return tailora_swagger_ui
@@ -156,6 +164,10 @@ def _render_base_docs_html(
       url: {safe_openapi_url},
       dom_id: \"#swagger-ui\",
       deepLinking: true,
+      queryConfigEnabled: false,
+      validatorUrl: null,
+      persistAuthorization: false,
+      useUnsafeMarkdown: false,
       presets: [
         SwaggerUIBundle.presets.apis,
         SwaggerUIBundle.SwaggerUIStandalonePreset
@@ -276,6 +288,10 @@ def _render_docs_scripts(
         url: {safe_openapi_url},
         dom_id: \"#swagger-ui\",
         deepLinking: true,
+        queryConfigEnabled: false,
+        validatorUrl: null,
+        persistAuthorization: false,
+        useUnsafeMarkdown: false,
         presets: [
           SwaggerUIBundle.presets.apis,
           SwaggerUIBundle.SwaggerUIStandalonePreset

@@ -47,3 +47,10 @@ def test_get_inspector_asset_path_traversal_prevention():
     """상위 디렉터리 경로 접근 시도시 FileNotFoundError를 발생시키는지 확인한다."""
     with pytest.raises(FileNotFoundError):
         get_inspector_asset("../loader.py")
+
+
+def test_base_path_cannot_inject_html_attributes():
+    """로더를 직접 사용하는 호출자도 base_path로 HTML을 삽입할 수 없다."""
+    content = render_inspector_index('/x"><img src=x onerror="alert(1)">')
+    assert "<img src=x" not in content
+    assert "&quot;&gt;&lt;img" in content

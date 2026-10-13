@@ -2,8 +2,10 @@
 
 from collections.abc import Sequence
 import inspect
+import ipaddress
 import logging
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request, params
 
@@ -13,6 +15,55 @@ AUTHENTICATION_REQUIRED_MESSAGE = "Inspector authentication required."
 ACCESS_DENIED_MESSAGE = "Inspector access denied."
 
 logger = logging.getLogger(__name__)
+
+
+def is_local_inspector_request(request: Request) -> bool:
+    """인증 없는 Inspector는 loopback client와 명시적 localhost Host만 허용한다."""
+    try:
+        client = request.client
+        if client is None or not ipaddress.ip_address(client.host).is_loopback:
+            return False
+        hosts = request.headers.getlist("host")
+        if len(hosts) != 1:
+            return False
+        host = hosts[0]
+        if any(character.isspace() for character in host) or any(
+            character in host for character in "/\\@?#%"
+        ):
+            return False
+        url = urlsplit("//" + host)
+        hostname = url.hostname
+        if url.port is not None and not 1 <= url.port <= 65_535:
+            return False
+        if hostname != "localhost" and (
+            hostname is None or not ipaddress.ip_address(hostname).is_loopback
+        ):
+            return False
+        if request.headers.get("sec-fetch-site") == "cross-site":
+            return False
+        origins = request.headers.getlist("origin")
+        if not origins:
+            return True
+        if len(origins) != 1:
+            return False
+        origin = urlsplit(origins[0])
+        scheme = request.scope.get("scheme", "http")
+        default_port = 443 if scheme == "https" else 80
+        return (
+            origin.scheme == scheme
+            and origin.hostname == hostname
+            and (origin.port if origin.port is not None else default_port)
+            == (url.port if url.port is not None else default_port)
+            and not (
+                origin.username is not None
+                or origin.password is not None
+                or origin.path
+                or origin.query
+                or origin.fragment
+            )
+        )
+    except (ValueError, TypeError):
+        return False
 
 
 def normalize_inspector_dependencies(

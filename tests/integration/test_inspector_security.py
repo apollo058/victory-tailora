@@ -34,7 +34,7 @@ def test_default_enable_call_does_not_modify_application():
     """enabled를 명시하지 않으면 수집기와 API를 등록하지 않는다."""
     app = create_application()
     store = enable_inspector(app)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     assert client.get("/__tailora/health").status_code == 404
     assert "TailoraSwaggerPlugin" not in client.get("/docs").text
@@ -44,11 +44,155 @@ def test_default_enable_call_does_not_modify_application():
     assert store.size() == 0
 
 
+def test_enabled_inspector_with_unspecified_environment_requires_authentication():
+    """환경을 누락해도 로컬로 간주하여 인증 없는 API를 등록하지 않는다."""
+    app = create_application()
+    original_routes = list(app.router.routes)
+    with pytest.raises(ValueError, match="access_check"):
+        enable_inspector(app, enabled=True)
+    assert app.router.routes == original_routes
+    assert count_tailora_middleware(app) == 0
+
+
+@pytest.mark.parametrize(
+    ("client_host", "host", "expected_status"),
+    [
+        ("127.0.0.1", "localhost", 200),
+        ("127.0.0.1", "127.0.0.1:8000", 200),
+        ("::1", "[::1]:8000", 200),
+        ("203.0.113.1", "localhost", 403),
+        ("127.0.0.1", "attacker.example", 403),
+        ("127.0.0.1", "localhost.attacker.example", 403),
+        ("127.0.0.1", "localhost@attacker.example", 403),
+        ("127.0.0.1", "localhost:invalid", 403),
+        ("127.0.0.1", "localhost:99999", 403),
+        ("127.0.0.1", "localhost\\attacker.example", 403),
+    ],
+)
+def test_unauthenticated_local_inspector_checks_client_and_host(
+    client_host,
+    host,
+    expected_status,
+):
+    """로컬 모드에서 외부 클라이언트와 DNS rebinding Host를 거부한다."""
+    app = create_application()
+    enable_inspector(app, enabled=True, environment="development")
+    client = TestClient(app, base_url="http://localhost", client=(client_host, 50000))
+    response = client.get("/__tailora/health", headers={"host": host})
+    assert response.status_code == expected_status
+    docs = client.get("/docs", headers={"host": host})
+    assert ("TailoraSwaggerPlugin" in docs.text) is (expected_status == 200)
+
+
+def test_forwarded_headers_do_not_authorize_a_remote_local_mode_request():
+    """직접 전달한 proxy 헤더를 인증 없는 로컬 접근의 근거로 사용하지 않는다."""
+    app = create_application()
+    enable_inspector(app, enabled=True, environment="development")
+    client = TestClient(app, base_url="http://localhost", client=("203.0.113.1", 50000))
+    response = client.get(
+        "/__tailora/requests",
+        headers={"x-forwarded-for": "127.0.0.1", "x-forwarded-host": "localhost"},
+    )
+    assert response.status_code == 403
+
+
+def test_duplicate_host_headers_are_denied_in_local_mode():
+    """여러 Host의 해석 차이로 로컬 검사를 우회하지 못한다."""
+    app = create_application()
+    enable_inspector(app, enabled=True, environment="development")
+    client = TestClient(app, base_url="http://localhost", client=("127.0.0.1", 50000))
+    response = client.get(
+        "/__tailora/health",
+        headers=[("host", "localhost"), ("host", "attacker.example")],
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    ("headers", "expected_status"),
+    [
+        ({"origin": "http://localhost"}, 200),
+        ({"origin": "https://localhost"}, 403),
+        ({"origin": "http://localhost:3000"}, 403),
+        ({"origin": "http://localhost:0"}, 403),
+        ({"origin": "https://attacker.example"}, 403),
+        ({"origin": "null"}, 403),
+        ({"origin": "http://localhost@attacker.example"}, 403),
+        ({"sec-fetch-site": "cross-site"}, 403),
+    ],
+)
+def test_local_access_denies_other_origins_even_when_host_cors_is_permissive(
+    headers,
+    expected_status,
+):
+    """호스트 앱 CORS가 넓어도 다른 origin에 로컬 Inspector 데이터를 제공하지 않는다."""
+    from fastapi.middleware.cors import CORSMiddleware
+
+    app = create_application()
+    enable_inspector(app, enabled=True, environment="development")
+    app.add_middleware(CORSMiddleware, allow_origins=["*"])
+    client = TestClient(app, base_url="http://localhost", client=("127.0.0.1", 50000))
+    response = client.get("/__tailora/requests", headers=headers)
+    assert response.status_code == expected_status
+    if expected_status != 200:
+        assert '"items"' not in response.text
+
+
+def test_authenticated_inspector_can_serve_a_remote_request():
+    """정상 인증한 공유 환경의 클라이언트는 loopback 제한을 받지 않는다."""
+    app = create_application()
+    enable_inspector(app, enabled=True, access_check=lambda request: True)
+    client = TestClient(
+        app, base_url="https://app.example", client=("203.0.113.1", 50000)
+    )
+    assert client.get("/__tailora/health").status_code == 200
+
+
+def test_inspector_ui_response_has_script_and_frame_protection():
+    """Inspector iframe에는 동일 origin의 외부 스크립트만 허용한다."""
+    app = create_application()
+    enable_inspector(app, enabled=True, access_check=lambda request: True)
+    response = TestClient(app).get("/__tailora")
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "SAMEORIGIN"
+    policy = response.headers["content-security-policy"]
+    assert "script-src 'self';" in policy
+    assert "frame-ancestors 'self'" in policy
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/__tailora/health",
+        "/__tailora/requests?limit=invalid",
+        "/__tailora/aggregates?limit=1000000",
+        "/__tailora/requests/unknown-id",
+        "/__tailora/index.html",
+        "/__tailora/styles.css",
+        "/__tailora/swagger-plugin.css",
+        "/%5f%5ftailora/requests",
+        "/__tailora/ignored/../app.js",
+        "/__tailora/%2e%2e/loader.py",
+    ],
+)
+def test_denied_access_cannot_be_bypassed_with_path_or_validation_inputs(path):
+    """경로 인코딩·정규화·잘못된 입력으로 데이터나 자산 인증을 우회하지 못한다."""
+    app = create_application()
+    enable_inspector(app, enabled=True, access_check=lambda request: False)
+    response = TestClient(
+        app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+    ).get(path)
+    assert response.status_code == 403
+    assert response.headers["cache-control"] == "no-store"
+    assert "<!doctype" not in response.text.lower()
+    assert "stored_requests" not in response.text
+
+
 def test_explicit_enable_turns_capture_api_and_plugin_on_together():
     """enabled=True를 지정하면 수집·API·Swagger plugin이 함께 켜진다."""
     app = create_application()
-    store = enable_inspector(app, enabled=True)
-    client = TestClient(app)
+    store = enable_inspector(app, enabled=True, environment="development")
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     assert client.get("/__tailora/health").status_code == 200
     assert "TailoraSwaggerPlugin" in client.get("/docs").text
@@ -63,9 +207,10 @@ def test_path_prefix_keyword_configures_all_inspector_routes():
     enable_inspector(
         app,
         enabled=True,
+        environment="development",
         path_prefix="/diagnostics",
     )
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     assert client.get("/diagnostics/health").status_code == 200
     assert client.get("/__tailora/health").status_code == 404
@@ -162,7 +307,7 @@ def test_shared_environment_accepts_authentication_dependency(caplog):
             dependencies=[Depends(require_key)],
         )
 
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
     assert client.get("/__tailora/health").status_code == 401
     assert client.get("/__tailora/health?api_key=test-key").status_code == 200
     assert "access_control=True" in caplog.text
@@ -177,8 +322,10 @@ def test_access_check_protects_all_endpoints_assets_and_plugin():
         return request.headers.get("x-inspector-access") == "allowed"
 
     app = create_application()
-    enable_inspector(app, enabled=True, access_check=allow_with_header)
-    client = TestClient(app)
+    enable_inspector(
+        app, enabled=True, environment="development", access_check=allow_with_header
+    )
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
     protected_paths = (
         "/__tailora/health",
         "/__tailora/requests",
@@ -211,9 +358,13 @@ def test_denied_inspector_response_disables_caching():
         return False
 
     app = create_application()
-    enable_inspector(app, enabled=True, access_check=deny_request)
+    enable_inspector(
+        app, enabled=True, environment="development", access_check=deny_request
+    )
 
-    response = TestClient(app).get("/__tailora/health")
+    response = TestClient(
+        app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+    ).get("/__tailora/health")
 
     assert response.status_code == 403
     assert response.headers["cache-control"] == "no-store"
@@ -227,8 +378,10 @@ def test_async_access_check_is_supported_by_api_and_docs():
         return request.cookies.get("inspector_session") == "allowed"
 
     app = create_application()
-    enable_inspector(app, enabled=True, access_check=allow_cookie)
-    client = TestClient(app)
+    enable_inspector(
+        app, enabled=True, environment="development", access_check=allow_cookie
+    )
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     assert client.get("/__tailora/health").status_code == 403
     assert "TailoraSwaggerPlugin" not in client.get("/docs").text
@@ -242,13 +395,13 @@ def test_duplicate_enable_with_same_settings_is_idempotent():
     """같은 설정으로 두 번 활성화해도 등록과 수집이 중복되지 않는다."""
     app = create_application()
 
-    first_store = enable_inspector(app, enabled=True)
-    second_store = enable_inspector(app, enabled=True)
+    first_store = enable_inspector(app, enabled=True, environment="development")
+    second_store = enable_inspector(app, enabled=True, environment="development")
 
     assert first_store is second_store
     assert count_tailora_middleware(app) == 1
 
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
     client.get("/hello")
     assert first_store.size() == 1
 
@@ -256,12 +409,13 @@ def test_duplicate_enable_with_same_settings_is_idempotent():
 def test_duplicate_enable_with_different_settings_is_rejected():
     """이미 켜진 앱에 다른 설정을 조용히 덮어쓰지 않는다."""
     app = create_application()
-    enable_inspector(app, enabled=True)
+    enable_inspector(app, enabled=True, environment="development")
 
     with pytest.raises(ValueError, match="different configuration"):
         enable_inspector(
             app,
             enabled=True,
+            environment="development",
             prefix="/diagnostics",
         )
 
@@ -283,6 +437,7 @@ def test_path_collision_is_rejected_before_registration():
         enable_inspector(
             app,
             enabled=True,
+            environment="development",
             prefix="/diagnostics",
         )
 
@@ -303,6 +458,7 @@ def test_catch_all_route_collision_is_rejected_before_registration():
         enable_inspector(
             app,
             enabled=True,
+            environment="development",
             path_prefix="/diagnostics",
         )
 
@@ -317,6 +473,7 @@ def test_empty_list_excluded_paths_does_not_bypass_type_validation():
         enable_inspector(
             app,
             enabled=True,
+            environment="development",
             excluded_paths=[],  # type: ignore[arg-type]
         )
 
@@ -334,6 +491,7 @@ def test_invalid_dependencies_are_rejected_before_registration(
         enable_inspector(
             app,
             enabled=True,
+            environment="development",
             dependencies=dependencies,
         )
 
@@ -357,7 +515,7 @@ def test_registration_failure_rolls_application_back(monkeypatch):
     )
 
     with pytest.raises(RuntimeError, match="docs install failed"):
-        enable_inspector(app, enabled=True)
+        enable_inspector(app, enabled=True, environment="development")
 
     assert app.router.routes == original_routes
     assert app.user_middleware == original_middleware
@@ -373,8 +531,8 @@ def test_sensitive_request_and_response_values_are_not_collected():
         """요청 본문의 비밀값을 응답으로 돌려준다."""
         return payload
 
-    store = enable_inspector(app, enabled=True)
-    client = TestClient(app)
+    store = enable_inspector(app, enabled=True, environment="development")
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
     secret = "request-body-super-secret"
 
     response = client.post(
@@ -397,7 +555,7 @@ def test_invalid_engine_rolls_application_back():
     original_routes = list(app.router.routes)
 
     with pytest.raises(TypeError, match="Engine"):
-        enable_inspector(app, enabled=True, engine=object())
+        enable_inspector(app, enabled=True, environment="development", engine=object())
 
     assert app.router.routes == original_routes
     assert count_tailora_middleware(app) == 0

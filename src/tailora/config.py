@@ -63,8 +63,7 @@ def normalize_path_prefix(value: object, field_name: str = "path_prefix") -> str
     normalized = normalized.rstrip("/")
     segments = normalized.removeprefix("/").split("/")
     if any(
-        segment in {"", ".", ".."}
-        or _PATH_SEGMENT_PATTERN.fullmatch(segment) is None
+        segment in {"", ".", ".."} or _PATH_SEGMENT_PATTERN.fullmatch(segment) is None
         for segment in segments
     ):
         raise ValueError(f"{field_name} contains an unsafe path segment")
@@ -75,9 +74,7 @@ def _normalize_excluded_paths(values: object) -> tuple[str, ...]:
     """사용자 지정 제외 경로를 검증하고 중복을 제거한다."""
     if not isinstance(values, tuple):
         raise ValueError("excluded_paths must be a tuple of paths")
-    normalized = [
-        normalize_path_prefix(value, "excluded_paths") for value in values
-    ]
+    normalized = [normalize_path_prefix(value, "excluded_paths") for value in values]
     return tuple(dict.fromkeys(normalized))
 
 
@@ -86,7 +83,7 @@ class InspectorConfig:
     """Inspector의 활성화, 보안 정책, 자원 한도를 하나로 관리한다."""
 
     enabled: bool = False
-    environment: str = "development"
+    environment: str = "unspecified"
     allow_in_production: bool = False
     path_prefix: str = "/__tailora"
     store_capacity: int = DEFAULT_CAPACITY
@@ -126,8 +123,7 @@ class InspectorConfig:
         )
         if self.enabled and self.is_production and not self.allow_in_production:
             raise ValueError(
-                "allow_in_production must be True to enable Inspector "
-                "in production",
+                "allow_in_production must be True to enable Inspector in production",
             )
 
     @property
@@ -136,6 +132,8 @@ class InspectorConfig:
         return self.environment in _PRODUCTION_ENVIRONMENTS or (
             self.environment.startswith("prod-")
             or self.environment.startswith("production-")
+            or self.environment.startswith("prod_")
+            or self.environment.startswith("production_")
         )
 
     @property

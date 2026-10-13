@@ -21,8 +21,7 @@ def _initialize_sqlite_schema(engine: Any) -> None:
     with engine.begin() as conn:
         conn.execute(
             text(
-                "CREATE TABLE users "
-                "(id INTEGER PRIMARY KEY, name TEXT, role TEXT)",
+                "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, role TEXT)",
             ),
         )
         conn.execute(
@@ -35,6 +34,7 @@ def _initialize_sqlite_schema(engine: Any) -> None:
 
 def _register_sqlite_routes(app: FastAPI, engine: Any) -> None:
     """성공·생성·실패 SQL 흐름을 검증할 FastAPI 라우트를 등록한다."""
+
     @app.get("/users/{user_id}")
     def get_user(user_id: int) -> dict[str, str]:
         """사용자 단건 조회 엔드포인트."""
@@ -74,7 +74,9 @@ def create_sqlite_test_app() -> tuple[FastAPI, Any, RingBuffer]:
         poolclass=StaticPool,
     )
     store = RingBuffer()
-    enable_inspector(app, store=store, engine=engine, enabled=True)
+    enable_inspector(
+        app, store=store, engine=engine, enabled=True, environment="development"
+    )
     _initialize_sqlite_schema(engine)
     _register_sqlite_routes(app, engine)
 
@@ -90,7 +92,9 @@ def test_sql_parameters_are_never_stored():
         poolclass=StaticPool,
     )
     store = RingBuffer()
-    enable_inspector(app, store=store, engine=engine, enabled=True)
+    enable_inspector(
+        app, store=store, engine=engine, enabled=True, environment="development"
+    )
 
     @app.get("/parameterized")
     def parameterized_query() -> dict[str, bool]:
@@ -103,7 +107,9 @@ def test_sql_parameters_are_never_stored():
         return {"ok": True}
 
     try:
-        response = TestClient(app).get("/parameterized")
+        response = TestClient(
+            app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+        ).get("/parameterized")
 
         assert response.status_code == 200
         assert "sql-parameter-super-secret" not in repr(store.list()[0])
@@ -116,7 +122,9 @@ def test_sqlite_queries_captured_in_request_event():
     """FastAPI 요청에서 실행된 SQLite 쿼리가 RequestEvent에 기록되는지 확인한다."""
     app, engine, store = create_sqlite_test_app()
     try:
-        client = TestClient(app)
+        client = TestClient(
+            app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+        )
         response = client.get("/users/1")
 
         assert response.status_code == 200
@@ -144,7 +152,9 @@ def test_multiple_queries_sequence_and_aggregation():
     """한 요청에서 복수 쿼리의 순서와 총 쿼리 시간 집계를 확인한다."""
     app, engine, store = create_sqlite_test_app()
     try:
-        client = TestClient(app)
+        client = TestClient(
+            app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+        )
         response = client.post("/users?name=charlie&role=guest")
 
         assert response.status_code == 200
@@ -168,7 +178,12 @@ def test_database_error_creates_failed_query_and_500_response():
     """DB 오류 발생 시 500 응답과 함께 실패한 QueryEvent가 기록되는지 확인한다."""
     app, engine, store = create_sqlite_test_app()
     try:
-        client = TestClient(app, raise_server_exceptions=False)
+        client = TestClient(
+            app,
+            raise_server_exceptions=False,
+            base_url="http://127.0.0.1",
+            client=("127.0.0.1", 50000),
+        )
         response = client.get("/db-error")
 
         assert response.status_code == 500
