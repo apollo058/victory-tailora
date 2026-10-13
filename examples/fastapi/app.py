@@ -59,6 +59,7 @@ enable_inspector(
         query_heavy_time_ms=40.0,
     ),
     enabled=True,
+    environment="development",
 )
 
 

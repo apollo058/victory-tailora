@@ -34,7 +34,7 @@ def test_default_config_is_disabled_and_bounded():
     config = InspectorConfig()
 
     assert config.enabled is False
-    assert config.environment == "development"
+    assert config.environment == "unspecified"
     assert config.path_prefix == "/__tailora"
     assert config.store_capacity == 100
     assert config.api_default_limit == 20
@@ -133,6 +133,13 @@ def test_production_region_name_is_treated_as_production():
     """production 접두사가 포함된 환경 이름도 production으로 보호한다."""
     with pytest.raises(ValueError, match="allow_in_production"):
         InspectorConfig(enabled=True, environment="production-seoul")
+
+
+@pytest.mark.parametrize("environment", ["prod_seoul", "production_seoul"])
+def test_production_underscore_region_requires_confirmation(environment):
+    """underscore로 구분한 production 환경도 추가 확인을 요구한다."""
+    with pytest.raises(ValueError, match="allow_in_production"):
+        InspectorConfig(enabled=True, environment=environment)
 
 
 def test_config_rejects_disabled_redaction_policy():

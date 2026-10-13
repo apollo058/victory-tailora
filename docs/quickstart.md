@@ -17,6 +17,7 @@ Tailora는 개발 중인 FastAPI 요청과 SQLAlchemy 쿼리를 같은 Swagger �
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade "pip>=26.2.1"
 python -m pip install -e ".[dev,fastapi,example]"
 python -m uvicorn examples.fastapi.app:app --reload
 ```
@@ -64,13 +65,15 @@ from fastapi import FastAPI
 from tailora.adapters.fastapi import enable_inspector
 
 app = FastAPI()
-enable_inspector(app, engine=engine, enabled=True)
+enable_inspector(app, engine=engine, enabled=True, environment="development")
 ```
 
 이후 호스트 앱의 docs URL을 열고 Inspector 탭을 선택하십시오. 공유 개발 환경에서는
 `access_check` 또는 인증 `dependencies`를 설정하십시오. production에서는 접근 제어와
 네트워크 제한을 적용하고 `allow_in_production=True`를 함께 지정해야 합니다.
 로컬 이외 환경에서는 접근 제어 설정 없이 Inspector를 켤 수 없습니다.
+환경을 생략하면 `unspecified`로 분류되어 접근 제어를 요구합니다. 인증 없는
+로컬 모드는 loopback client와 `localhost` 또는 loopback IP Host만 허용합니다.
 
 ## 개발 설치와 pre-release 설치 구분
 
@@ -103,7 +106,11 @@ GitHub issue로 문제를 보고하십시오. 취약점은 공개 issue에 비�
 릴리스 후보는 다음 검사를 통과한 뒤에만 배포 승인 대상으로 올립니다.
 
 ```bash
-python -m pip install -e ".[dev,fastapi,example,release]"
+python -m pip install --upgrade "pip>=26.2.1"
+python -m pip install -e ".[dev,fastapi,example,release,security]"
+python -m pip_audit
+bandit -r src -ll
+python scripts/check_swagger_security.py
 python -m pytest -q
 ruff check .
 python -m build

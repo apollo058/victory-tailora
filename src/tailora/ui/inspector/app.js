@@ -291,7 +291,7 @@
     itemElement.innerHTML = `
       <div class="request-item-top">
         <div class="method-route">
-          <span class="method-tag method-${methodUpper}">${methodUpper}</span>
+          <span class="method-tag method-${escapeHtml(methodUpper)}">${escapeHtml(methodUpper)}</span>
           <span class="route-text" title="${escapeHtml(item.route_template)}">${escapeHtml(item.route_template)}</span>
         </div>
         <div class="status-duration">

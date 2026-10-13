@@ -10,12 +10,30 @@ from tailora.core.policies import RedactionPolicy
 
 REDACTED: str = "[REDACTED]"
 
-_NUMBER_LITERAL: re.Pattern[str] = re.compile(r"\b\d+(?:\.\d+)?\b")
+MAX_SQL_INPUT_LENGTH = 65_536
+_SUPPORTED_DIALECTS = frozenset(
+    {
+        "sqlite",
+        "postgresql",
+        "mysql",
+        "mariadb",
+        "oracle",
+        "mssql",
+    }
+)
+_NUMBER_LITERAL: re.Pattern[str] = re.compile(
+    r"(?<![\w$])(?:"
+    r"0[xX][0-9a-fA-F](?:_?[0-9a-fA-F])*|"
+    r"0[bB][01](?:_?[01])*|0[oO][0-7](?:_?[0-7])*|"
+    r"(?:\d(?:_?\d)*(?:\.(?:\d(?:_?\d)*)?)?|\.\d(?:_?\d)*)"
+    r"(?:[eE][+-]?\d(?:_?\d)*)?[fFdD]?"
+    r")(?![\w$])",
+)
 _ERROR_TYPE_PATTERN: re.Pattern[str] = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
 _DATABASE_NAME_PATTERN: re.Pattern[str] = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 _DIALECT_NAME_PATTERN: re.Pattern[str] = re.compile(r"[A-Za-z0-9_-]{1,32}")
 _DOLLAR_QUOTE_OPEN: re.Pattern[str] = re.compile(
-    r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$",
+    r"\$(?:[A-Za-z_\u0080-\U0010ffff][A-Za-z0-9_\u0080-\U0010ffff]*)?\$",
 )
 
 
@@ -55,10 +73,13 @@ def redact_headers(
         if name.lower() in policy.blocked_headers:
             result[name] = REDACTED
         else:
-            result[name] = truncate_str(
-                value,
-                policy.max_header_value_length,
-            ) or ""
+            result[name] = (
+                truncate_str(
+                    value,
+                    policy.max_header_value_length,
+                )
+                or ""
+            )
     return result
 
 
@@ -155,6 +176,12 @@ def redact_error_summary(
 
 def _redact_sql_fragments(statement: str, dialect: str | None = None) -> str:
     """SQL 문자열·주석·숫자 리터럴을 순서대로 제거한다."""
+    if not isinstance(statement, str) or len(statement) > MAX_SQL_INPUT_LENGTH:
+        raise ValueError("SQL input exceeds the inspection limit")
+    if dialect is not None:
+        dialect = dialect.strip().lower()
+        if dialect not in _SUPPORTED_DIALECTS:
+            raise ValueError("SQL dialect is not supported for redaction")
     fragments: list[str] = []
     index = 0
     while index < len(statement):
@@ -167,11 +194,30 @@ def _redact_sql_fragments(statement: str, dialect: str | None = None) -> str:
         if statement.startswith("/*", index):
             index = _redact_block_comment(statement, index, fragments)
             continue
+        oracle_end = _skip_oracle_quoted_value(statement, index)
+        if oracle_end is not None:
+            fragments.append("?")
+            index = oracle_end
+            continue
+        if statement[index] == "[" and dialect in {None, "sqlite", "mssql"}:
+            fragments.append("?")
+            index = _skip_quoted_value(statement, index, "]", backslash=False)
+            continue
         if statement[index] in "'\"`":
             fragments.append("?")
-            index = _skip_quoted_value(statement, index, statement[index])
+            backslash = _backslash_mode(statement, index, dialect)
+            index = _skip_quoted_value(
+                statement,
+                index,
+                statement[index],
+                backslash=backslash,
+            )
             continue
-        dollar_match = _DOLLAR_QUOTE_OPEN.match(statement, index)
+        dollar_match = (
+            _DOLLAR_QUOTE_OPEN.match(statement, index)
+            if statement[index] == "$"
+            else None
+        )
         if dollar_match is not None:
             fragments.append("?")
             index = _skip_dollar_quoted_value(
@@ -212,21 +258,77 @@ def _redact_block_comment(
     index: int,
     fragments: list[str],
 ) -> int:
-    """SQL 여러 줄 주석의 내용을 제거하고 다음 위치를 반환한다."""
+    """중첩 주석도 끝까지 제거하며 닫히지 않은 주석은 나머지를 버린다."""
     fragments.append(f"/* {REDACTED} */")
-    comment_end = statement.find("*/", index + 2)
-    if comment_end == -1:
+    depth = 1
+    index += 2
+    while index < len(statement):
+        if statement.startswith("/*", index):
+            depth += 1
+            index += 2
+        elif statement.startswith("*/", index):
+            depth -= 1
+            index += 2
+            if depth == 0:
+                return index
+        else:
+            index += 1
+    return len(statement)
+
+
+def _skip_oracle_quoted_value(statement: str, index: int) -> int | None:
+    """Oracle q/nq 리터럴의 구분자로 전체 값을 건너뛴다."""
+    if index and (statement[index - 1].isalnum() or statement[index - 1] in "_$"):
+        return None
+    prefix_length = 0
+    if statement[index : index + 2].lower() == "q'":
+        prefix_length = 2
+    elif statement[index : index + 3].lower() == "nq'":
+        prefix_length = 3
+    if not prefix_length:
+        return None
+    opening_index = index + prefix_length
+    if opening_index >= len(statement):
         return len(statement)
-    return comment_end + 2
+    opening = statement[opening_index]
+    if opening.isspace():
+        raise ValueError("SQL alternative quote delimiter is invalid")
+    closing = {"[": "]", "{": "}", "(": ")", "<": ">"}.get(opening, opening)
+    end = statement.find(closing + "'", opening_index + 1)
+    return len(statement) if end == -1 else end + 2
 
 
-def _skip_quoted_value(statement: str, index: int, quote: str) -> int:
+def _backslash_mode(statement: str, index: int, dialect: str | None) -> bool | None:
+    """접속별 SQL mode가 필요한 경우 추측하지 않고 모호한 값을 버린다."""
+    if dialect in {"sqlite", "oracle", "mssql"}:
+        return False
+    if dialect == "postgresql" and statement[index] == '"':
+        return False
+    if dialect == "postgresql" and statement[index] == "'" and index:
+        if statement[index - 1] in "eE" and (
+            index < 2
+            or not (statement[index - 2].isalnum() or statement[index - 2] in "_$")
+        ):
+            return True
+    return None
+
+
+def _skip_quoted_value(
+    statement: str,
+    index: int,
+    quote: str,
+    *,
+    backslash: bool | None,
+) -> int:
     """SQL 따옴표 값의 끝을 찾고 닫히지 않은 값도 끝까지 건너뛴다."""
     index += 1
     while index < len(statement):
-        if statement[index] == "\\" and index + 1 < len(statement):
-            index += 2
-            continue
+        if statement[index] == "\\":
+            if backslash is None:
+                raise ValueError("SQL backslash interpretation is ambiguous")
+            if backslash and index + 1 < len(statement):
+                index += 2
+                continue
         if statement[index] == quote:
             if index + 1 < len(statement) and statement[index + 1] == quote:
                 index += 2

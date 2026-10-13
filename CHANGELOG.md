@@ -2,6 +2,22 @@
 
 이 파일은 릴리스별 사용자 영향과 호환성 변경을 기록합니다.
 
+## Unreleased — 2026-10-13 security review
+
+- 환경을 생략한 Inspector 활성화는 인증을 요구합니다. 인증 없는 로컬 사용은
+  `environment="development"`를 명시하고 loopback client/Host로 접속해야 합니다.
+- SQL 인용·중첩 주석·유니코드 dollar quote·확장 숫자 표현의 값 노출을 수정하고,
+  모호한 SQL mode와 미지원 방언의 원문은 보관하지 않습니다.
+- SQL 원문 처리에 65,536자 상한을 적용하고 요청 쿼리 한도 이후에는 원문 처리를
+  생략합니다. SQLAlchemy 측정 상태에 SQL 원문을 추가 보관하지 않습니다.
+- Inspector 문자열 렌더링을 escape하고 CSP와 동일 origin 프레임 제한을 적용합니다.
+- Swagger UI는 SRI와 함께 5.33.2로 갱신합니다. 외부 validator, query 설정 덮어쓰기,
+  인증값의 영구 저장을 비활성화합니다.
+- 최소 의존성은 FastAPI 0.135, Starlette 1.3.1, SQLAlchemy 2.0.31, pytest 9.0.3으로
+  올립니다. 보안 검사 extra와 반복 검사 workflow를 추가합니다.
+- Swagger 번들의 전체 의존성 검증은 아직 통과하지 않았습니다.
+  [보안 검사 보고서](docs/security-audit.md)의 남은 항목을 릴리스 전에 확인해야 합니다.
+
 ## 0.1.0rc1 — 2026-09-09
 
 첫 번째 pre-release 후보입니다.

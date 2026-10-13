@@ -1,5 +1,6 @@
 """UI 정적 자산 로딩 및 템플릿 렌더링 유틸리티."""
 
+import html
 import importlib.resources
 import posixpath
 
@@ -28,7 +29,7 @@ def render_inspector_index(base_path: str = "/__tailora") -> str:
     raw_html = resource_files.joinpath("index.html").read_text(encoding="utf-8")
 
     # {{BASE_PATH}} 플레이스홀더를 현재 API 접두사로 치환
-    return raw_html.replace("{{BASE_PATH}}", normalized_base)
+    return raw_html.replace("{{BASE_PATH}}", html.escape(normalized_base, quote=True))
 
 
 def get_inspector_asset(

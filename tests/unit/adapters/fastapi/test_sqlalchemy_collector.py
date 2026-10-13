@@ -95,8 +95,7 @@ def test_engine_registry_does_not_retain_destroyed_engines():
 
     assert engine_reference() is None
     assert all(
-        id(engine) != engine_id
-        for engine in sqlalchemy_adapter._REGISTERED_ENGINES
+        id(engine) != engine_id for engine in sqlalchemy_adapter._REGISTERED_ENGINES
     )
 
 
@@ -168,6 +167,54 @@ def test_query_ignored_when_no_active_context(engine):
         result = conn.execute(text("SELECT 1"))
         assert result.scalar() == 1
     assert get_current_context() is None
+
+
+def test_sqlite_backslash_literals_are_redacted_before_context_storage(engine):
+    """실제 SQLite 쿼리의 값이 수집 직후 컨텍스트에도 남지 않는다."""
+    register_sqlalchemy_inspector(engine)
+    ctx = RequestContext("req-backslash", EVENT_TIME, time.perf_counter())
+    token = set_current_context(ctx)
+    try:
+        with engine.connect() as conn:
+            result = conn.exec_driver_sql("SELECT 'prefix\\' || 'tailora-secret'")
+            assert result.scalar() == "prefix\\tailora-secret"
+            assert not hasattr(result.context, sqlalchemy_adapter._STATE_KEY)
+        assert len(ctx.queries) == 1
+        assert ctx.queries[0].statement == "SELECT ? || ?"
+        assert "tailora-secret" not in repr(ctx)
+    finally:
+        reset_current_context(token)
+
+
+def test_queries_over_capture_limit_skip_sql_processing(engine, monkeypatch):
+    """보관 한도 이후에는 SQL 원문 처리 없이 전체 실행 수와 시간만 측정한다."""
+    register_sqlalchemy_inspector(engine)
+    ctx = RequestContext(
+        "req-limited",
+        EVENT_TIME,
+        time.perf_counter(),
+        max_queries_per_request=1,
+    )
+    captured_statements = []
+    original = sqlalchemy_adapter.redact_sql_statement
+
+    def record_redaction(statement, **kwargs):
+        if statement is not None:
+            captured_statements.append(statement)
+        return original(statement, **kwargs)
+
+    monkeypatch.setattr(sqlalchemy_adapter, "redact_sql_statement", record_redaction)
+    token = set_current_context(ctx)
+    try:
+        with engine.connect() as conn:
+            conn.exec_driver_sql("SELECT 1")
+            conn.exec_driver_sql("SELECT 'tailora-secret'")
+        assert captured_statements == ["SELECT 1"]
+        assert len(ctx.queries) == 1
+        assert ctx.total_query_count == 2
+        assert "tailora-secret" not in repr(ctx)
+    finally:
+        reset_current_context(token)
 
 
 def test_multiple_queries_sequence_increment(engine):

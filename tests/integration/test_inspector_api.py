@@ -64,6 +64,7 @@ def create_inspector_app(
         excluded_paths=excluded_paths,
         dependencies=dependencies,
         enabled=True,
+        environment="development",
     )
     return app, resolved_store
 
@@ -73,7 +74,7 @@ def test_health_endpoint():
     store = RingBuffer(capacity=50)
     store.add(make_request("req-1"))
     app, _ = create_inspector_app(store=store)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/__tailora/health")
 
@@ -96,7 +97,9 @@ def test_health_endpoint():
 def test_inspector_data_responses_disable_caching(path: str):
     """Inspector 데이터 응답이 브라우저와 중간 캐시에 저장되지 않는지 확인한다."""
     app, _ = create_inspector_app()
-    response = TestClient(app).get(path)
+    response = TestClient(
+        app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+    ).get(path)
 
     assert response.headers["cache-control"] == "no-store"
 
@@ -115,7 +118,9 @@ def test_standalone_router_error_responses_disable_caching():
             access_check=deny_request,
         ),
     )
-    denied_response = TestClient(denied_app).get("/__tailora/health")
+    denied_response = TestClient(
+        denied_app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+    ).get("/__tailora/health")
 
     validation_app = FastAPI()
     validation_app.include_router(
@@ -124,7 +129,9 @@ def test_standalone_router_error_responses_disable_caching():
             allow_unauthenticated=True,
         ),
     )
-    validation_response = TestClient(validation_app).get(
+    validation_response = TestClient(
+        validation_app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+    ).get(
         "/__tailora/requests?limit=0",
     )
 
@@ -137,7 +144,7 @@ def test_standalone_router_error_responses_disable_caching():
 def test_requests_list_empty():
     """저장된 이벤트가 없을 때 빈 목록과 메타데이터를 반환하는지 확인한다."""
     app, _ = create_inspector_app()
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/__tailora/requests")
 
@@ -158,7 +165,7 @@ def test_requests_list_ordered_and_limited():
     store.add(make_request("req-3", duration_ms=30.0))
 
     app, _ = create_inspector_app(store=store)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/__tailora/requests?limit=2")
 
@@ -196,7 +203,9 @@ def test_requests_list_passes_limit_to_store_snapshot():
     store.add(make_request("req-2"))
     app, _ = create_inspector_app(store=store)
 
-    response = TestClient(app).get("/__tailora/requests?limit=1")
+    response = TestClient(
+        app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+    ).get("/__tailora/requests?limit=1")
 
     assert response.status_code == 200
     assert store.requested_limits == [1]
@@ -226,7 +235,9 @@ def test_aggregates_use_public_store_snapshot():
     store.add(make_request("req-1"))
     app, _ = create_inspector_app(store=store)
 
-    response = TestClient(app).get("/__tailora/aggregates")
+    response = TestClient(
+        app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+    ).get("/__tailora/aggregates")
 
     assert response.status_code == 200
     assert store.view_limits == [None]
@@ -235,7 +246,7 @@ def test_aggregates_use_public_store_snapshot():
 def test_requests_list_invalid_limit_returns_422():
     """잘못된 limit 파라미터 요청 시 422 오류를 반환하는지 확인한다."""
     app, _ = create_inspector_app()
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     assert client.get("/__tailora/requests?limit=0").status_code == 422
     assert client.get("/__tailora/requests?limit=-5").status_code == 422
@@ -249,6 +260,7 @@ def test_configured_store_and_api_limits_are_applied():
     store = enable_inspector(
         app,
         enabled=True,
+        environment="development",
         store_capacity=3,
         api_default_limit=1,
         api_max_limit=2,
@@ -263,7 +275,7 @@ def test_configured_store_and_api_limits_are_applied():
                 queries=[query],
             ),
         )
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     health = client.get("/__tailora/health").json()
     requests = client.get("/__tailora/requests").json()
@@ -287,7 +299,7 @@ def test_request_detail_found():
     store = RingBuffer()
     store.add(make_request("req-target", queries=[make_query(1)]))
     app, _ = create_inspector_app(store=store)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/__tailora/requests/req-target")
 
@@ -302,7 +314,7 @@ def test_request_detail_found():
 def test_request_detail_not_found():
     """존재하지 않는 요청 ID로 조회 시 404 오류를 반환하는지 확인한다."""
     app, _ = create_inspector_app()
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/__tailora/requests/nonexistent-id")
 
@@ -315,7 +327,7 @@ def test_request_detail_not_found():
 def test_request_detail_not_found_does_not_echo_sensitive_id():
     """요청 ID에 민감한 값이 있어도 404 응답에 되돌려주지 않는다."""
     app, _ = create_inspector_app()
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/__tailora/requests/token=super-secret")
 
@@ -326,7 +338,12 @@ def test_request_detail_not_found_does_not_echo_sensitive_id():
 def test_request_detail_with_invalid_whitespace_id_returns_safe_not_found():
     """공백 request ID가 내부 예외 대신 안전한 404를 반환하는지 확인한다."""
     app, _ = create_inspector_app()
-    client = TestClient(app, raise_server_exceptions=False)
+    client = TestClient(
+        app,
+        raise_server_exceptions=False,
+        base_url="http://127.0.0.1",
+        client=("127.0.0.1", 50000),
+    )
 
     response = client.get("/__tailora/requests/%20")
 
@@ -340,7 +357,7 @@ def test_aggregates_endpoint():
     store.add(make_request("req-1", route_template="/users", queries=[make_query(1)]))
     store.add(make_request("req-2", route_template="/users", queries=[make_query(1)]))
     app, _ = create_inspector_app(store=store)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/__tailora/aggregates")
 
@@ -364,7 +381,7 @@ def test_aggregates_endpoint():
 def test_inspector_api_requests_not_captured_even_with_custom_excluded_paths():
     """커스텀 제외 경로 지정 시에도 Inspector 요청이 수집되지 않음을 확인한다."""
     app, store = create_inspector_app(excluded_paths=("/custom-ignore",))
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     client.get("/__tailora/health")
     client.get("/__tailora/requests")
@@ -376,7 +393,7 @@ def test_inspector_api_requests_not_captured_even_with_custom_excluded_paths():
 def test_disabled_inspector_does_not_expose_routes():
     """비활성 상태에서는 Inspector 라우트가 노출되지 않는지 확인한다."""
     app = FastAPI()
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     assert client.get("/__tailora/health").status_code == 404
     assert client.get("/__tailora/requests").status_code == 404
@@ -393,7 +410,7 @@ def test_api_layer_enforces_redaction_defense_in_depth():
     store.add(make_request("req-secret", queries=[unredacted_query]))
 
     app, _ = create_inspector_app(store=store)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     response = client.get("/__tailora/requests/req-secret")
     assert response.status_code == 200
@@ -414,7 +431,9 @@ def test_api_layer_drops_injected_error_messages_and_stack_hints():
     store.add(event)
     app, _ = create_inspector_app(store=store)
 
-    response = TestClient(app).get("/__tailora/requests/req-error-secret")
+    response = TestClient(
+        app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)
+    ).get("/__tailora/requests/req-error-secret")
 
     assert response.status_code == 200
     error = response.json()["error"]
@@ -456,8 +475,9 @@ def test_inspector_api_with_authentication_dependency():
         app,
         dependencies=[Depends(verify_token)],
         enabled=True,
+        environment="development",
     )
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
     # 인증 없이 요청 -> 401
     resp_unauth = client.get("/__tailora/health")
@@ -477,12 +497,12 @@ def test_enable_inspector_idempotent():
         """테스트용 엔드포인트."""
         return {"msg": "hello"}
 
-    store1 = enable_inspector(app, enabled=True)
-    store2 = enable_inspector(app, enabled=True)
+    store1 = enable_inspector(app, enabled=True, environment="development")
+    store2 = enable_inspector(app, enabled=True, environment="development")
 
     assert store1 is store2
 
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
     resp = client.get("/hello")
     assert resp.status_code == 200
 

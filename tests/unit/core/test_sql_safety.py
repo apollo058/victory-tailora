@@ -1,9 +1,14 @@
 """SQL statement 처리와 fingerprint 생성을 확인한다."""
 
+import random
+import sqlite3
+
+import pytest
 
 from tailora.core.limits import truncate_str
 from tailora.core.policies import RedactionPolicy
 from tailora.core.privacy import make_sql_fingerprint, redact_sql_statement
+from tailora.core.privacy import MAX_SQL_INPUT_LENGTH
 
 
 def test_string_literal_is_replaced():
@@ -114,3 +119,77 @@ def test_truncate_str_never_exceeds_requested_length():
 
     assert result is not None
     assert len(result) <= 5
+
+
+@pytest.mark.parametrize(
+    ("dialect", "statement", "secret"),
+    [
+        ("sqlite", "SELECT 'prefix\\' || 'tailora-secret'", "tailora-secret"),
+        ("oracle", "SELECT q'!it's tailora-secret!' FROM dual", "tailora-secret"),
+        ("oracle", "SELECT nq'[it's tailora-secret]' FROM dual", "tailora-secret"),
+        (
+            "postgresql",
+            "SELECT 1 /* outer /* inner */ tailora-secret */",
+            "tailora-secret",
+        ),
+        ("mssql", "SELECT 1 /* outer /* inner */ tailora-secret */", "tailora-secret"),
+        ("postgresql", "SELECT $태그$tailora-secret$태그$", "tailora-secret"),
+        ("postgresql", "SELECT $🐈$tailora-secret$🐈$", "tailora-secret"),
+        ("postgresql", "SELECT E'prefix\\'tailora-secret'", "tailora-secret"),
+        ("mssql", "SELECT [col'umn], 'tailora-secret'", "tailora-secret"),
+        ("sqlite", "SELECT 987654321e5", "987654321"),
+        ("sqlite", "SELECT 0xABCDEF", "ABCDEF"),
+        ("postgresql", "SELECT 987_654_321, .987654321", "987"),
+    ],
+)
+def test_dialect_specific_literals_and_comments_do_not_leak(dialect, statement, secret):
+    """동일한 비밀값이 SQL과 fingerprint 어느 쪽에도 남지 않는다."""
+    for value in (
+        redact_sql_statement(statement, dialect=dialect),
+        make_sql_fingerprint(statement, dialect=dialect),
+    ):
+        assert value is not None
+        assert secret.lower() not in value.lower()
+
+
+@pytest.mark.parametrize("dialect", [None, "mysql", "mariadb", "postgresql"])
+def test_ambiguous_backslash_modes_drop_sql_and_fingerprint(dialect):
+    """접속 SQL mode에 따라 다르게 해석되는 문자열은 저장하지 않는다."""
+    statement = "SELECT 'prefix\\' || 'tailora-secret'"
+    assert redact_sql_statement(statement, dialect=dialect) is None
+    assert make_sql_fingerprint(statement, dialect=dialect) is None
+
+
+def test_unknown_dialect_does_not_guess_its_literal_syntax():
+    """지원하지 않는 SQL 방언의 쿼리 원문은 버린다."""
+    assert redact_sql_statement("SELECT custom_literal", dialect="custom") is None
+    assert make_sql_fingerprint("SELECT custom_literal", dialect="custom") is None
+
+
+def test_oversized_sql_is_dropped_before_scanning(monkeypatch):
+    """출력 잘림과 별도로 원문 처리에도 상한을 적용한다."""
+    import tailora.core.privacy as privacy
+
+    def fail_if_scanned(*args, **kwargs):
+        raise AssertionError("oversized input was scanned")
+
+    monkeypatch.setattr(privacy, "_skip_oracle_quoted_value", fail_if_scanned)
+    statement = "S" * (MAX_SQL_INPUT_LENGTH + 1)
+    assert redact_sql_statement(statement) is None
+    assert make_sql_fingerprint(statement) is None
+
+
+def test_generated_valid_sqlite_literals_never_leak():
+    """SQLite가 실제 실행한 여러 인용·백슬래시 조합에서 값 노출을 검사한다."""
+    generator = random.Random(731)
+    alphabet = "abc'\\\n\r\t![]$/*-한글"
+    with sqlite3.connect(":memory:") as connection:
+        for _ in range(250):
+            value = "tailora-secret-" + "".join(generator.choices(alphabet, k=35))
+            literal = "'" + value.replace("'", "''") + "'"
+            statement = "SELECT " + literal + " || 'second-secret'"
+            assert (
+                connection.execute(statement).fetchone()[0] == value + "second-secret"
+            )
+            assert redact_sql_statement(statement, dialect="sqlite") == "SELECT ? || ?"
+            assert make_sql_fingerprint(statement, dialect="sqlite") == "select ? || ?"

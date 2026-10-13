@@ -14,7 +14,10 @@ from tailora.adapters.fastapi.docs import (
     install_tailora_docs,
 )
 from tailora.adapters.fastapi.middleware import TailoraMiddleware
-from tailora.adapters.fastapi.security import normalize_inspector_dependencies
+from tailora.adapters.fastapi.security import (
+    is_local_inspector_request,
+    normalize_inspector_dependencies,
+)
 from tailora.config import AccessCheck, InspectorConfig
 from tailora.core.policies import RedactionPolicy, ThresholdPolicy
 from tailora.core.store import DEFAULT_CAPACITY, RingBuffer
@@ -70,14 +73,10 @@ def _build_config(
         api_max_limit=api_max_limit,
         redaction_policy=policy if policy is not None else RedactionPolicy(),
         threshold_policy=(
-            threshold_policy
-            if threshold_policy is not None
-            else ThresholdPolicy()
+            threshold_policy if threshold_policy is not None else ThresholdPolicy()
         ),
         access_check=access_check,
-        excluded_paths=(
-            excluded_paths if excluded_paths is not None else ()
-        ),
+        excluded_paths=(excluded_paths if excluded_paths is not None else ()),
     )
 
 
@@ -132,9 +131,7 @@ def _ensure_prefix_is_available(app: FastAPI, prefix: str) -> None:
     probe_paths = (prefix, f"{prefix}/health")
     for route in app.router.routes:
         path = getattr(route, "path", None)
-        if isinstance(path, str) and (
-            path == prefix or path.startswith(f"{prefix}/")
-        ):
+        if isinstance(path, str) and (path == prefix or path.startswith(f"{prefix}/")):
             raise ValueError(
                 f"path_prefix conflicts with an existing route: {prefix}",
             )
@@ -213,7 +210,11 @@ def _register_components(
     install_tailora_docs(
         app,
         inspector_prefix=config.path_prefix,
-        access_check=config.access_check,
+        access_check=(
+            config.access_check
+            if config.access_check is not None or dependencies
+            else is_local_inspector_request
+        ),
     )
     if engine is not None:
         _register_engine(engine)
@@ -344,7 +345,7 @@ def enable_inspector(
     dependencies: Sequence[params.Depends] | None = None,
     *,
     enabled: bool = False,
-    environment: str = "development",
+    environment: str = "unspecified",
     allow_in_production: bool = False,
     access_check: AccessCheck | None = None,
     path_prefix: str = "/__tailora",
